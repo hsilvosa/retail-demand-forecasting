@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e '.[lakehouse,app,dev]'
+      - run: ruff check src tests app
+      - run: mypy src
+      - run: pytest -m 'not integration and not notebook' --cov=retail_forecasting
+      - run: docker compose config --quiet
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: pip install -e '.[lakehouse,notebooks,dev]'
+      - run: pytest -m integration
+      - run: pytest --nbmake notebooks/00_environment.ipynb

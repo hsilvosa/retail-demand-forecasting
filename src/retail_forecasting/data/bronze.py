@@ -18,7 +18,11 @@ def _schema_for(name: str, header: list[str]) -> StructType | None:
         string_columns = {"id", "item_id", "dept_id", "cat_id", "store_id", "state_id"}
         return StructType(
             [
-                StructField(column, StringType() if column in string_columns else IntegerType(), True)
+                StructField(
+                    column,
+                    StringType() if column in string_columns else IntegerType(),
+                    True,
+                )
                 for column in header
             ]
         )

@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-lakehouse = ["delta-spark==3.3.2", "pyspark>=3.5.3,<3.6"]
+lakehouse = ["delta-spark==3.3.2", "kaggle>=1.7,<2", "pyspark>=3.5.3,<3.6"]
 modeling = [
   "lightgbm>=4.5,<5",
   "mlflow>=3.5,<4",

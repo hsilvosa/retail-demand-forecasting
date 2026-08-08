@@ -415,7 +415,44 @@ def run_final_forecast(config: ProjectConfig, run_id: str) -> dict[str, Any]:
     path = table_path(config, "gold", "forecasts_bottom")
     if path.exists():
         return {"run_id": run_id, "forecast_table": str(path), "status": "already_materialized"}
-    return run_forecasting(config, run_id)
+    import mlflow
+
+    mlflow.set_tracking_uri(config.mlflow.tracking_uri)
+    client = mlflow.MlflowClient()
+    champion = client.get_model_version_by_alias(config.mlflow.registered_model, "champion")
+    model = mlflow.pyfunc.load_model(
+        f"models:/{config.mlflow.registered_model}@champion"
+    )
+    spark = get_spark(config, "registered-forecast")
+    future = spark.read.format("delta").load(
+        str(table_path(config, "gold", "forecast_features"))
+    ).drop("_run_id").toPandas()
+    predicted = model.predict(future)
+    if {"series_id", "target_date"}.issubset(predicted.columns):
+        keyed = future.copy()
+        keyed["target_date"] = pd.to_datetime(keyed["target_date"])
+        final = keyed.merge(predicted, on=["series_id", "target_date"], how="left")
+    else:
+        final = _attach_predictions(
+            future.assign(target=np.nan),
+            predicted,
+            str(champion.tags.get("model", "champion")),
+            config.data.forecast_origin_day,
+        )
+    final["origin_date"] = pd.to_datetime(final["origin_date"]).dt.date
+    final["target_date"] = pd.to_datetime(final["target_date"]).dt.date
+    model_name = str(champion.tags.get("model", "champion"))
+    paths = _write_forecast_tables(
+        spark, config, final, run_id, model_name, str(champion.version)
+    )
+    spark.stop()
+    return {
+        "run_id": run_id,
+        "model": model_name,
+        "model_version": str(champion.version),
+        "forecasts": paths,
+        "status": "loaded_champion_alias",
+    }
 
 
 def run_single_model(

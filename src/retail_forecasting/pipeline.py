@@ -38,7 +38,7 @@ def _is_current(config: ProjectConfig, stage: str) -> bool:
     if not path.exists():
         return False
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    return manifest.get("fingerprint") == _fingerprint(config, stage)
+    return bool(manifest.get("fingerprint") == _fingerprint(config, stage))
 
 
 def _write_manifest(
