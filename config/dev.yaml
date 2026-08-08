@@ -1,0 +1,14 @@
+profile: dev
+spark:
+  master: local[4]
+  driver_memory: 4g
+  executor_memory: 4g
+  shuffle_partitions: 24
+data:
+  sample_series: 900
+  sample_per_state: 300
+  history_days: 730
+models:
+  optuna_trials: 3
+  nhits_max_steps: 100
+  require_gpu: false

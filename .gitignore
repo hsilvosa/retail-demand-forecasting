@@ -1,0 +1,33 @@
+# Source data and generated lakehouse state
+data/*
+!data/.gitkeep
+lakehouse/
+artifacts/
+mlartifacts/
+mlruns/
+state/
+
+# Local services and credentials
+.env
+postgres-data/
+minio-data/
+
+# Python and notebooks
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
