@@ -27,7 +27,10 @@ def explain_tree(forecaster: Any, frame: pd.DataFrame, output_dir: Path) -> dict
     plt.tight_layout()
     plt.savefig(bar_path, dpi=160, bbox_inches="tight")
     plt.close()
-    attribution = pd.DataFrame(values.values, columns=features.columns)
+    attribution = pd.DataFrame(
+        values.values,
+        columns=[f"shap_{column}" for column in features.columns],
+    )
     attribution.insert(0, "series_id", sample["series_id"].to_numpy())
     attribution.insert(1, "horizon", sample["horizon"].to_numpy())
     values_path = output_dir / f"{forecaster.name}-shap-values.parquet"

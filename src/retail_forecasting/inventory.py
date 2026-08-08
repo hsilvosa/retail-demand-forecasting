@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from pyspark.sql import functions as F
 
 from retail_forecasting.config import InventoryConfig, ProjectConfig
 from retail_forecasting.data.spark import get_spark, table_path, write_delta
@@ -100,7 +101,7 @@ def simulate_series(
             if order_quantity > 0:
                 arrival_day = day + policy.lead_time_days
                 arrivals[arrival_day] = arrivals.get(arrival_day, 0.0) + order_quantity
-        price = float(row.get("target_sell_price", 0.0) or 0.0)
+        price = float(row.get("unit_price", row.get("target_sell_price", 0.0)) or 0.0)
         rows.append(
             {
                 "target_date": row["target_date"],
@@ -187,9 +188,25 @@ def build_recommendations(
 
 def run_inventory(config: ProjectConfig, run_id: str) -> dict[str, Any]:
     spark = get_spark(config, "inventory")
-    backtests = spark.read.format("delta").load(
+    backtest_table = spark.read.format("delta").load(
         str(table_path(config, "gold", "backtest_forecasts"))
-    ).toPandas()
+    )
+    if "unit_price" not in backtest_table.columns:
+        prices = (
+            spark.read.format("delta")
+            .load(str(table_path(config, "gold", "training_features")))
+            .select(
+                "series_id",
+                "origin_day",
+                "horizon",
+                F.col("target_sell_price").alias("unit_price"),
+            )
+            .dropDuplicates(["series_id", "origin_day", "horizon"])
+        )
+        backtest_table = backtest_table.join(
+            prices, ["series_id", "origin_day", "horizon"], "left"
+        )
+    backtests = backtest_table.toPandas()
     final_forecasts = spark.read.format("delta").load(
         str(table_path(config, "gold", "forecasts_bottom"))
     ).toPandas()
