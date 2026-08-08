@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from pyspark.sql import DataFrame, Window
@@ -26,11 +27,11 @@ def _sample_series(frame: DataFrame, config: ProjectConfig) -> DataFrame:
 
 
 def _normalize_sales(wide: DataFrame, config: ProjectConfig) -> DataFrame:
-    id_columns = ["id", "item_id", "dept_id", "cat_id", "store_id", "state_id"]
-    day_columns = sorted(
+    id_columns = ("id", "item_id", "dept_id", "cat_id", "store_id", "state_id")
+    day_columns = tuple(sorted(
         (column for column in wide.columns if column.startswith("d_")),
         key=lambda value: int(value.removeprefix("d_")),
-    )
+    ))
     selected = _sample_series(wide.select(*id_columns, *day_columns), config)
     return (
         selected.unpivot(id_columns, day_columns, "d", "units")
@@ -55,13 +56,11 @@ def run_silver(config: ProjectConfig, run_id: str) -> dict[str, Any]:
         "_source_file", "_source_sha256", "_ingested_at", "_run_id"
     )
     sales = _normalize_sales(bronze("sales_train_evaluation"), config)
-    daily = (
-        sales.join(calendar, ["d", "day_num"], "left")
-        .join(prices, ["store_id", "item_id", "wm_yr_wk"], "left")
-        .withColumn("year", F.year("date"))
-        .withColumn("price_missing", F.col("sell_price").isNull())
-        .withColumn("_run_id", F.lit(run_id))
-    )
+    sales.createOrReplaceTempView("normalized_sales")
+    calendar.createOrReplaceTempView("silver_calendar")
+    prices.createOrReplaceTempView("silver_prices")
+    silver_sql = Path("sql/silver_sales_daily.sql").read_text(encoding="utf-8")
+    daily = spark.sql(silver_sql).withColumn("_run_id", F.lit(run_id))
     quality = validate_silver_sales(daily)
     if not quality["valid"]:
         raise ValueError(f"Silver validation failed: {json.dumps(quality)}")

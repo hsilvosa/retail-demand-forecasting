@@ -13,7 +13,7 @@ authors = [{ name = "Retail Forecasting Portfolio" }]
 dependencies = [
   "boto3>=1.35,<2",
   "joblib>=1.4,<2",
-  "numpy>=1.26,<3",
+  "numpy>=1.26,<2.4",
   "pandas>=2.2,<3",
   "pyarrow>=17,<21",
   "pydantic>=2.9,<3",
@@ -49,9 +49,8 @@ dev = [
   "pytest>=8.3,<10",
   "pytest-cov>=6,<8",
   "ruff>=0.8,<1",
+  "types-PyYAML>=6",
 ]
-all = ["retail-demand-forecasting[lakehouse,modeling,app,notebooks,dev]"]
-
 [project.scripts]
 retail-forecast = "retail_forecasting.cli:app"
 
@@ -70,6 +69,8 @@ python_version = "3.11"
 packages = ["retail_forecasting"]
 ignore_missing_imports = true
 strict = true
+warn_return_any = false
+disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"

@@ -121,6 +121,69 @@ def build_direct_features(daily: DataFrame, config: ProjectConfig) -> DataFrame:
     )
 
 
+def build_forecast_features(
+    daily: DataFrame, calendar: DataFrame, prices: DataFrame, config: ProjectConfig
+) -> DataFrame:
+    """Create future-known rows at the final origin without using future demand."""
+    featured = add_origin_features(daily, config)
+    origin = featured.filter(F.col("day_num") == config.data.forecast_origin_day).alias("origin")
+    future_calendar = calendar.select(
+        F.col("day_num").alias("target_day_num"),
+        F.col("date").alias("target_date"),
+        "wm_yr_wk",
+        F.col("wday").alias("target_wday"),
+        F.col("month").alias("target_month"),
+        F.col("event_type_1").alias("target_event_type"),
+        F.col("snap_CA").alias("target_snap_CA"),
+        F.col("snap_TX").alias("target_snap_TX"),
+        F.col("snap_WI").alias("target_snap_WI"),
+    ).alias("calendar")
+    horizons = daily.sparkSession.range(1, config.data.horizon + 1).select(
+        F.col("id").cast("int").alias("horizon")
+    )
+    expanded = origin.crossJoin(horizons).withColumn(
+        "target_day", F.col("origin.day_num") + F.col("horizon")
+    )
+    joined = expanded.join(
+        future_calendar, F.col("target_day") == F.col("calendar.target_day_num"), "inner"
+    ).join(
+        prices.alias("prices"),
+        (F.col("origin.store_id") == F.col("prices.store_id"))
+        & (F.col("origin.item_id") == F.col("prices.item_id"))
+        & (F.col("calendar.wm_yr_wk") == F.col("prices.wm_yr_wk")),
+        "left",
+    )
+    return (
+        joined.select(
+            F.col("origin.series_id"),
+            F.col("origin.item_id"),
+            F.col("origin.dept_id"),
+            F.col("origin.cat_id"),
+            F.col("origin.store_id"),
+            F.col("origin.state_id"),
+            F.col("origin.day_num").alias("origin_day"),
+            F.col("origin.date").alias("origin_date"),
+            "horizon",
+            "target_date",
+            F.col("prices.sell_price").alias("target_sell_price"),
+            "target_wday",
+            "target_month",
+            "target_event_type",
+            "target_snap_CA",
+            "target_snap_TX",
+            "target_snap_WI",
+            *[F.col(f"origin.lag_{lag}") for lag in config.features.lags],
+            *[
+                F.col(f"origin.{stat}_{width}")
+                for width in config.features.rolling_windows
+                for stat in ("rolling_mean", "rolling_std", "nonzero_rate")
+            ],
+            F.col("origin.days_since_last_sale"),
+            F.col("origin.short_long_trend"),
+        )
+        .withColumn("price_missing", F.col("target_sell_price").isNull().cast("int"))
+        .fillna(0.0, subset=["target_sell_price"])
+    )
 def build_hierarchy(daily: DataFrame) -> DataFrame:
     dimensions = daily.select(
         "series_id", "item_id", "dept_id", "cat_id", "store_id", "state_id"
@@ -148,14 +211,22 @@ def build_hierarchy(daily: DataFrame) -> DataFrame:
 def run_gold(config: ProjectConfig, run_id: str) -> dict[str, Any]:
     spark = get_spark(config, "gold")
     daily = spark.read.format("delta").load(str(table_path(config, "silver", "sales_daily")))
+    calendar = spark.read.format("delta").load(str(table_path(config, "silver", "calendar")))
+    prices = spark.read.format("delta").load(str(table_path(config, "silver", "sell_prices")))
     direct = build_direct_features(daily, config).withColumn("_run_id", F.lit(run_id))
+    future = build_forecast_features(daily, calendar, prices, config).withColumn(
+        "_run_id", F.lit(run_id)
+    )
     hierarchy = build_hierarchy(daily).withColumn("_run_id", F.lit(run_id))
     write_delta(direct, table_path(config, "gold", "training_features"), ["origin_day"])
+    write_delta(future, table_path(config, "gold", "forecast_features"))
     write_delta(hierarchy, table_path(config, "gold", "hierarchy"), ["level"])
     outputs = {
         "training_features": str(table_path(config, "gold", "training_features")),
+        "forecast_features": str(table_path(config, "gold", "forecast_features")),
         "hierarchy": str(table_path(config, "gold", "hierarchy")),
         "feature_rows": direct.count(),
+        "forecast_rows": future.count(),
         "hierarchy_rows": hierarchy.count(),
     }
     spark.stop()
