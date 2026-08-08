@@ -36,6 +36,10 @@ def _cuda_available() -> bool:
         return False
 
 
+def _tree_uses_gpu(name: str) -> bool:
+    return name == "xgboost" and _cuda_available()
+
+
 def _split_fold(features: DataFrame, origin: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     train = features.filter(
         (F.col("origin_day") < origin) & (F.col("origin_day") + F.col("horizon") <= origin)
@@ -78,7 +82,7 @@ def _tree_predictions(
     model = DirectTreeForecaster(
         cast(ModelKind, name),
         seed=config.seed,
-        use_gpu=_cuda_available(),
+        use_gpu=_tree_uses_gpu(name),
         params=parameters,
     )
     model.fit(fit, validation)
@@ -129,7 +133,7 @@ def _tune_parameters(
             validation_sample,
             config.models.optuna_trials,
             config.seed,
-            _cuda_available(),
+            _tree_uses_gpu(name),
         )
         for name in config.models.names
         if name in TREE_MODELS
@@ -208,7 +212,7 @@ def _fit_final(
         tree_model = DirectTreeForecaster(
             cast(ModelKind, winner),
             seed=config.seed,
-            use_gpu=_cuda_available(),
+            use_gpu=_tree_uses_gpu(winner),
             params=parameters.get(winner, {}),
         ).fit(fit, validation)
         return tree_model, tree_model.predict(future), future
@@ -483,7 +487,7 @@ def run_single_model(
                 validation.sample(frac=config.models.tune_fraction, random_state=config.seed),
                 config.models.optuna_trials,
                 config.seed,
-                _cuda_available(),
+                _tree_uses_gpu(model_name),
             )
             _, predicted = _tree_predictions(
                 model_name, train, evaluation, config, params

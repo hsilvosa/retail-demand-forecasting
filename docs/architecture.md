@@ -8,10 +8,11 @@ are separated even though they run on one machine.
 
 ## Runtime services
 
-The pipeline image contains Python 3.11, Java 17, PySpark 3.5, Delta Lake 3.3, MLflow, the model
-libraries, JupyterLab, and Streamlit. Spark master and worker processes use that image so the
-driver and executors have identical dependencies. The pipeline and Jupyter services request the
-NVIDIA device.
+The Dockerfile exposes focused build targets. Spark master and worker use a lakehouse image with
+Python 3.11, Java 17, PySpark 3.5, and Delta Lake 3.3. The training image extends it with tracking
+and model libraries, while Jupyter extends the training image with notebook tooling. MLflow and
+Streamlit use separate lightweight targets. Default development targets use CPU PyTorch; the
+`full` Compose profile exposes separate pipeline and Jupyter targets with CUDA PyTorch wheels.
 
 PostgreSQL owns MLflow metadata. MinIO owns artifacts through an S3-compatible endpoint. This
 separation exercises the same client and credential boundaries used with managed stores without

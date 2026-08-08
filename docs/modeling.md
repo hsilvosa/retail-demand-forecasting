@@ -13,8 +13,9 @@ features include horizon, calendar, events, SNAP, and planned price.
 ## Candidates
 
 Seasonal naive and a 28-day moving average establish transparent controls. LightGBM and XGBoost
-use Tweedie regression and GPU acceleration. N-HiTS uses 168 days of context, robust scaling,
-known future variables, and quantile loss for `q05`, `q50`, and `q95`.
+use Tweedie regression. LightGBM stays on its portable CPU wheel. XGBoost and N-HiTS run on CPU
+in the development image and use CUDA in the optional `full` image. N-HiTS uses 168 days of
+context, robust scaling, known future variables, and quantile loss for `q05`, `q50`, and `q95`.
 
 The boosting search uses a deterministic ten percent sample. Hyperparameters are selected on a
 temporal validation origin and the candidate is refitted on the complete profile. N-HiTS uses a

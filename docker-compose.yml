@@ -1,14 +1,13 @@
-x-app: &app
-  build: .
+x-runtime: &runtime
   env_file:
     - path: .env
       required: false
-  volumes:
-    - ./data:/workspace/data:ro
-    - ./lakehouse:/workspace/lakehouse
-    - ./artifacts:/workspace/artifacts
-    - ./state:/workspace/state
-    - ./notebooks:/workspace/notebooks
+  environment:
+    MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+    MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL:-http://minio:9000}
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minio}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minio-local-only}
+    AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
   networks: [retail]
 
 services:
@@ -53,7 +52,11 @@ services:
     networks: [retail]
 
   mlflow:
-    <<: *app
+    <<: *runtime
+    image: retail-forecasting-mlflow:latest
+    build:
+      context: .
+      target: mlflow
     command:
       - mlflow
       - server
@@ -73,25 +76,65 @@ services:
       retries: 20
 
   spark-master:
-    <<: *app
+    <<: *runtime
+    image: retail-forecasting-spark:latest
+    build:
+      context: .
+      target: spark
     command: ["spark-class", "org.apache.spark.deploy.master.Master"]
     environment:
       SPARK_MASTER_HOST: spark-master
       SPARK_MASTER_PORT: 7077
       SPARK_MASTER_WEBUI_PORT: 8080
     ports: ["7077:7077", "8080:8080"]
+    volumes:
+      - ./data:/workspace/data:ro
+      - ./lakehouse:/workspace/lakehouse
 
   spark-worker:
-    <<: *app
+    <<: *runtime
+    image: retail-forecasting-spark:latest
+    build:
+      context: .
+      target: spark
     command: ["spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     environment:
       SPARK_WORKER_CORES: 12
       SPARK_WORKER_MEMORY: 12g
     depends_on: [spark-master]
+    volumes:
+      - ./data:/workspace/data:ro
+      - ./lakehouse:/workspace/lakehouse
 
   pipeline:
-    <<: *app
+    <<: *runtime
+    image: retail-forecasting-pipeline:latest
+    build:
+      context: .
+      target: pipeline
     command: ["retail-forecast", "pipeline", "run", "--profile", "dev"]
+    volumes:
+      - ./data:/workspace/data:ro
+      - ./lakehouse:/workspace/lakehouse
+      - ./artifacts:/workspace/artifacts
+      - ./state:/workspace/state
+    depends_on:
+      mlflow: {condition: service_healthy}
+      spark-master: {condition: service_started}
+
+  pipeline-gpu:
+    <<: *runtime
+    profiles: [full]
+    image: retail-forecasting-pipeline-gpu:latest
+    build:
+      context: .
+      target: pipeline-gpu
+    command: ["retail-forecast", "pipeline", "run", "--profile", "full"]
+    volumes:
+      - ./data:/workspace/data:ro
+      - ./lakehouse:/workspace/lakehouse
+      - ./artifacts:/workspace/artifacts
+      - ./state:/workspace/state
     deploy:
       resources:
         reservations:
@@ -104,9 +147,37 @@ services:
       spark-master: {condition: service_started}
 
   jupyter:
-    <<: *app
+    <<: *runtime
+    image: retail-forecasting-jupyter:latest
+    build:
+      context: .
+      target: jupyter
     command: ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--ServerApp.token="]
     ports: ["8888:8888"]
+    volumes:
+      - ./data:/workspace/data:ro
+      - ./lakehouse:/workspace/lakehouse
+      - ./artifacts:/workspace/artifacts
+      - ./state:/workspace/state
+      - ./notebooks:/workspace/notebooks
+    depends_on:
+      mlflow: {condition: service_healthy}
+
+  jupyter-gpu:
+    <<: *runtime
+    profiles: [full]
+    image: retail-forecasting-jupyter-gpu:latest
+    build:
+      context: .
+      target: jupyter-gpu
+    command: ["jupyter", "lab", "--ip=0.0.0.0", "--port=8889", "--no-browser", "--allow-root", "--ServerApp.token="]
+    ports: ["8889:8889"]
+    volumes:
+      - ./data:/workspace/data:ro
+      - ./lakehouse:/workspace/lakehouse
+      - ./artifacts:/workspace/artifacts
+      - ./state:/workspace/state
+      - ./notebooks:/workspace/notebooks
     deploy:
       resources:
         reservations:
@@ -118,9 +189,16 @@ services:
       mlflow: {condition: service_healthy}
 
   dashboard:
-    <<: *app
+    <<: *runtime
+    image: retail-forecasting-dashboard:latest
+    build:
+      context: .
+      target: dashboard
     command: ["streamlit", "run", "app/dashboard.py", "--server.address=0.0.0.0", "--server.port=8501"]
     ports: ["8501:8501"]
+    volumes:
+      - ./lakehouse:/workspace/lakehouse:ro
+      - ./artifacts:/workspace/artifacts:ro
     depends_on:
       mlflow: {condition: service_healthy}
 

@@ -3,8 +3,8 @@
 ## Startup
 
 Create `.env` from `.env.example`, start PostgreSQL, MinIO, MLflow, and Spark, then run preflight.
-The full profile stops immediately when CUDA is unavailable. The development profile reports the
-missing GPU and continues on CPU.
+The full profile uses the `pipeline-gpu` service and stops immediately when CUDA is unavailable.
+The default development services are CPU-only and do not download CUDA dependencies.
 
 ## Recovery
 
@@ -21,7 +21,7 @@ Git-controlled backups.
 If Spark cannot download Delta coordinates, rebuild the image while network access is available.
 If MLflow cannot upload an artifact, verify the MinIO health check, bucket initialization, endpoint
 URL, and credentials. If GPU training falls back or fails, run `nvidia-smi` inside the pipeline
-container and verify Docker Desktop GPU integration.
+GPU container and verify Docker Desktop GPU integration.
 
 ## Reproducibility record
 

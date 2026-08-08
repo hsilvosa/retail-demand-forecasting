@@ -62,8 +62,6 @@ class DirectTreeForecaster:
                 "n_jobs": -1,
                 "verbosity": -1,
             }
-            if self.use_gpu:
-                defaults["device_type"] = "cuda"
             return LGBMRegressor(**(defaults | self.params))
         from xgboost import XGBRegressor
 

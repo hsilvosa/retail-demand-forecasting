@@ -1,31 +1,59 @@
-FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim-bookworm AS base
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
-    PYSPARK_PYTHON=/opt/conda/bin/python \
-    PYSPARK_DRIVER_PYTHON=/opt/conda/bin/python \
+    PYSPARK_PYTHON=/usr/local/bin/python \
+    PYSPARK_DRIVER_PYTHON=/usr/local/bin/python \
     SPARK_NO_DAEMONIZE=true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential cmake curl git libboost-dev libboost-filesystem-dev \
-      libboost-system-dev ninja-build openjdk-17-jre-headless tini \
+      curl git libgomp1 openjdk-17-jre-headless tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir '.[lakehouse,modeling,app,notebooks,dev]' && \
-    pip uninstall -y lightgbm && \
-    CMAKE_ARGS="-DUSE_CUDA=ON" pip install --no-cache-dir --no-binary lightgbm 'lightgbm>=4.5,<5'
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && pip install .
 
 COPY config ./config
 COPY sql ./sql
-COPY notebooks ./notebooks
-COPY app ./app
 COPY scripts ./scripts
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["retail-forecast", "--help"]
+
+FROM base AS spark
+RUN --mount=type=cache,target=/root/.cache/pip pip install '.[lakehouse]'
+
+FROM spark AS pipeline-base
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install '.[tracking,trees]'
+
+FROM pipeline-base AS pipeline
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.5.1' && \
+    pip install '.[deep]'
+
+FROM pipeline-base AS pipeline-gpu
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --index-url https://download.pytorch.org/whl/cu124 'torch==2.5.1' && \
+    pip install '.[deep]'
+
+FROM pipeline AS jupyter
+RUN --mount=type=cache,target=/root/.cache/pip pip install '.[notebooks]'
+COPY notebooks ./notebooks
+
+FROM pipeline-gpu AS jupyter-gpu
+RUN --mount=type=cache,target=/root/.cache/pip pip install '.[notebooks]'
+COPY notebooks ./notebooks
+
+FROM base AS mlflow
+RUN --mount=type=cache,target=/root/.cache/pip pip install '.[tracking]'
+
+FROM base AS dashboard
+RUN --mount=type=cache,target=/root/.cache/pip pip install '.[app]'
+COPY app ./app
