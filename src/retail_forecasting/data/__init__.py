@@ -1,0 +1,1 @@
+"""Medallion lakehouse stages."""

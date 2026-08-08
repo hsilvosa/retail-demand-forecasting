@@ -1,0 +1,14 @@
+profile: full
+spark:
+  master: spark://spark-master:7077
+  driver_memory: 10g
+  executor_memory: 12g
+  shuffle_partitions: 192
+data:
+  sample_series: null
+  sample_per_state: null
+  history_days: 730
+models:
+  optuna_trials: 12
+  nhits_max_steps: 500
+  require_gpu: true

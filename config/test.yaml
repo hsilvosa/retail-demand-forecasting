@@ -1,0 +1,19 @@
+profile: test
+spark:
+  master: local[2]
+  driver_memory: 2g
+  executor_memory: 2g
+  shuffle_partitions: 2
+data:
+  sample_series: 12
+  sample_per_state: 4
+  history_days: 90
+  horizon: 7
+  backtest_origins: [60]
+  forecast_origin_day: 67
+models:
+  names: [seasonal_naive, moving_average]
+  optuna_trials: 1
+  nhits_max_steps: 2
+inventory:
+  bootstrap_paths: 20

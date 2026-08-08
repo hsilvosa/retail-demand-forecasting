@@ -1,0 +1,51 @@
+project_name: retail-demand-forecasting
+profile: base
+seed: 42
+paths:
+  source: data
+  lakehouse: lakehouse
+  artifacts: artifacts
+  state: state
+spark:
+  master: spark://spark-master:7077
+  driver_memory: 6g
+  executor_memory: 8g
+  shuffle_partitions: 96
+data:
+  horizon: 28
+  history_days: 730
+  training_origin_step: 28
+  forecast_origin_day: 1941
+  backtest_origins: [1857, 1885, 1913]
+  required_files:
+    - calendar.csv
+    - sales_train_evaluation.csv
+    - sales_train_validation.csv
+    - sample_submission.csv
+    - sell_prices.csv
+features:
+  lags: [1, 7, 14, 28, 56, 364]
+  rolling_windows: [7, 28, 56]
+models:
+  names: [seasonal_naive, moving_average, lightgbm, xgboost, nhits]
+  quantiles: [0.05, 0.5, 0.95]
+  tune_fraction: 0.1
+  nhits_input_size: 168
+  require_gpu: false
+mlflow:
+  tracking_uri: http://mlflow:5000
+  experiment_prefix: retail-demand
+  registered_model: retail-demand-forecaster
+  improvement_threshold: 0.01
+  max_abs_bias: 0.05
+  coverage_min: 0.85
+  coverage_max: 0.95
+  max_fold_degradation: 0.05
+inventory:
+  lead_time_days: 7
+  review_period_days: 7
+  service_level: 0.95
+  bootstrap_paths: 1000
+  fixed_order_cost: 5.0
+  annual_holding_rate: 0.2
+  stockout_price_multiplier: 1.0

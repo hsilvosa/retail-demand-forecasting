@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "retail-demand-forecasting"
+version = "0.1.0"
+description = "Local M5 retail forecasting and inventory optimization lakehouse"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Retail Forecasting Portfolio" }]
+dependencies = [
+  "boto3>=1.35,<2",
+  "joblib>=1.4,<2",
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<3",
+  "pyarrow>=17,<21",
+  "pydantic>=2.9,<3",
+  "PyYAML>=6,<7",
+  "scikit-learn>=1.5,<2",
+  "structlog>=24,<26",
+  "typer>=0.12,<1",
+]
+
+[project.optional-dependencies]
+lakehouse = ["delta-spark==3.3.2", "pyspark>=3.5.3,<3.6"]
+modeling = [
+  "lightgbm>=4.5,<5",
+  "mlflow>=3.5,<4",
+  "neuralforecast>=2.0,<4",
+  "optuna>=4,<5",
+  "psycopg2-binary>=2.9,<3",
+  "shap>=0.46,<1",
+  "torch>=2.5,<3",
+  "xgboost>=2.1,<4",
+]
+app = ["deltalake>=0.22,<2", "plotly>=5.24,<7", "streamlit>=1.40,<2"]
+notebooks = [
+  "ipykernel>=6.29,<8",
+  "jupyterlab>=4.3,<5",
+  "nbformat>=5.10,<6",
+  "papermill>=2.6,<3",
+]
+dev = [
+  "mypy>=1.13,<2",
+  "nbmake>=1.5,<2",
+  "pandas-stubs>=2.2",
+  "pytest>=8.3,<10",
+  "pytest-cov>=6,<8",
+  "ruff>=0.8,<1",
+]
+all = ["retail-demand-forecasting[lakehouse,modeling,app,notebooks,dev]"]
+
+[project.scripts]
+retail-forecast = "retail_forecasting.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/retail_forecasting"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["retail_forecasting"]
+ignore_missing_imports = true
+strict = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = [
+  "integration: tests that require Spark or local services",
+  "notebook: executable notebook smoke tests",
+]
