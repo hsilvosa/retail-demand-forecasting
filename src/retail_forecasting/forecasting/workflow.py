@@ -36,6 +36,10 @@ def _cuda_available() -> bool:
         return False
 
 
+def _tree_uses_gpu(name: str) -> bool:
+    return name == "xgboost" and _cuda_available()
+
+
 def _split_fold(features: DataFrame, origin: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     train = features.filter(
         (F.col("origin_day") < origin) & (F.col("origin_day") + F.col("horizon") <= origin)
@@ -78,7 +82,7 @@ def _tree_predictions(
     model = DirectTreeForecaster(
         cast(ModelKind, name),
         seed=config.seed,
-        use_gpu=_cuda_available(),
+        use_gpu=_tree_uses_gpu(name),
         params=parameters,
     )
     model.fit(fit, validation)
@@ -129,7 +133,7 @@ def _tune_parameters(
             validation_sample,
             config.models.optuna_trials,
             config.seed,
-            _cuda_available(),
+            _tree_uses_gpu(name),
         )
         for name in config.models.names
         if name in TREE_MODELS
@@ -208,7 +212,7 @@ def _fit_final(
         tree_model = DirectTreeForecaster(
             cast(ModelKind, winner),
             seed=config.seed,
-            use_gpu=_cuda_available(),
+            use_gpu=_tree_uses_gpu(winner),
             params=parameters.get(winner, {}),
         ).fit(fit, validation)
         return tree_model, tree_model.predict(future), future
@@ -415,7 +419,44 @@ def run_final_forecast(config: ProjectConfig, run_id: str) -> dict[str, Any]:
     path = table_path(config, "gold", "forecasts_bottom")
     if path.exists():
         return {"run_id": run_id, "forecast_table": str(path), "status": "already_materialized"}
-    return run_forecasting(config, run_id)
+    import mlflow
+
+    mlflow.set_tracking_uri(config.mlflow.tracking_uri)
+    client = mlflow.MlflowClient()
+    champion = client.get_model_version_by_alias(config.mlflow.registered_model, "champion")
+    model = mlflow.pyfunc.load_model(
+        f"models:/{config.mlflow.registered_model}@champion"
+    )
+    spark = get_spark(config, "registered-forecast")
+    future = spark.read.format("delta").load(
+        str(table_path(config, "gold", "forecast_features"))
+    ).drop("_run_id").toPandas()
+    predicted = model.predict(future)
+    if {"series_id", "target_date"}.issubset(predicted.columns):
+        keyed = future.copy()
+        keyed["target_date"] = pd.to_datetime(keyed["target_date"])
+        final = keyed.merge(predicted, on=["series_id", "target_date"], how="left")
+    else:
+        final = _attach_predictions(
+            future.assign(target=np.nan),
+            predicted,
+            str(champion.tags.get("model", "champion")),
+            config.data.forecast_origin_day,
+        )
+    final["origin_date"] = pd.to_datetime(final["origin_date"]).dt.date
+    final["target_date"] = pd.to_datetime(final["target_date"]).dt.date
+    model_name = str(champion.tags.get("model", "champion"))
+    paths = _write_forecast_tables(
+        spark, config, final, run_id, model_name, str(champion.version)
+    )
+    spark.stop()
+    return {
+        "run_id": run_id,
+        "model": model_name,
+        "model_version": str(champion.version),
+        "forecasts": paths,
+        "status": "loaded_champion_alias",
+    }
 
 
 def run_single_model(
@@ -446,7 +487,7 @@ def run_single_model(
                 validation.sample(frac=config.models.tune_fraction, random_state=config.seed),
                 config.models.optuna_trials,
                 config.seed,
-                _cuda_available(),
+                _tree_uses_gpu(model_name),
             )
             _, predicted = _tree_predictions(
                 model_name, train, evaluation, config, params

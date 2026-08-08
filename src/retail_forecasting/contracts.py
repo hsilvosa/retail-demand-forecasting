@@ -27,7 +27,7 @@ class ForecastRecord(BaseModel):
     q95: float = Field(ge=0)
 
     @model_validator(mode="after")
-    def validate_quantiles(self) -> "ForecastRecord":
+    def validate_quantiles(self) -> ForecastRecord:
         if not self.q05 <= self.q50 <= self.q95:
             raise ValueError("forecast quantiles must be monotonic")
         return self

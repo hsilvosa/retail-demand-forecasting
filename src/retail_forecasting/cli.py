@@ -83,6 +83,14 @@ def data_validate(profile: ProfileOption = "dev") -> None:
         raise typer.Exit(1)
 
 
+@data_app.command("download")
+def data_download(profile: ProfileOption = "dev", force: bool = False) -> None:
+    from retail_forecasting.data.acquisition import download_m5
+
+    result = download_m5(load_config(profile), force=force)
+    typer.echo(json.dumps(result, indent=2))
+
+
 @model_app.command("backtest")
 def model_backtest(profile: ProfileOption = "dev", run_id: str | None = None) -> None:
     from retail_forecasting.forecasting.workflow import run_forecasting

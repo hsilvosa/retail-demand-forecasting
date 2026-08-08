@@ -63,7 +63,7 @@ def validate_source_files(config: ProjectConfig) -> dict[str, Any]:
     return {"valid": all(check["valid"] for check in checks), "checks": checks}
 
 
-def validate_silver_sales(frame: "DataFrame") -> dict[str, Any]:
+def validate_silver_sales(frame: DataFrame) -> dict[str, Any]:
     from pyspark.sql import functions as F
 
     summary = frame.agg(
@@ -76,6 +76,8 @@ def validate_silver_sales(frame: "DataFrame") -> dict[str, Any]:
     duplicates = (
         frame.groupBy("series_id", "day_num").count().filter(F.col("count") > 1).limit(1).count()
     )
+    if summary is None:
+        raise ValueError("Silver sales summary returned no row")
     report = summary.asDict()
     report["duplicate_keys"] = duplicates
     report["valid"] = bool(

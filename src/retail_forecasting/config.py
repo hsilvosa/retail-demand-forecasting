@@ -8,6 +8,9 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG_DIR = PROJECT_ROOT / "config"
+
 
 class PathsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -91,7 +94,7 @@ class ProjectConfig(BaseModel):
     inventory: InventoryConfig
 
     @model_validator(mode="after")
-    def validate_intervals(self) -> "ProjectConfig":
+    def validate_intervals(self) -> ProjectConfig:
         if self.mlflow.coverage_min > self.mlflow.coverage_max:
             raise ValueError("coverage_min cannot exceed coverage_max")
         if sorted(self.models.quantiles) != self.models.quantiles:
@@ -109,8 +112,9 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return result
 
 
-def load_config(profile: str = "dev", config_dir: Path = Path("config")) -> ProjectConfig:
+def load_config(profile: str = "dev", config_dir: Path | None = None) -> ProjectConfig:
     """Load base settings and overlay a named execution profile."""
+    config_dir = config_dir or DEFAULT_CONFIG_DIR
     base_path = config_dir / "base.yaml"
     profile_path = config_dir / f"{profile}.yaml"
     if not profile_path.exists():
@@ -119,4 +123,10 @@ def load_config(profile: str = "dev", config_dir: Path = Path("config")) -> Proj
         base = yaml.safe_load(handle)
     with profile_path.open(encoding="utf-8") as handle:
         override = yaml.safe_load(handle)
-    return ProjectConfig.model_validate(_deep_merge(base, override))
+    resolved = _deep_merge(base, override)
+    root = config_dir.parent.resolve()
+    resolved["paths"] = {
+        key: str((root / value).resolve()) if not Path(value).is_absolute() else value
+        for key, value in resolved["paths"].items()
+    }
+    return ProjectConfig.model_validate(resolved)

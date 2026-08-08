@@ -6,7 +6,6 @@ import shutil
 import socket
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
 
 from retail_forecasting.config import ProjectConfig
 
