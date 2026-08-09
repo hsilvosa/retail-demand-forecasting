@@ -7,7 +7,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from pyspark.sql import functions as F
 
 from retail_forecasting.config import InventoryConfig, ProjectConfig
 from retail_forecasting.data.spark import get_spark, table_path, write_delta
@@ -187,6 +186,8 @@ def build_recommendations(
 
 
 def run_inventory(config: ProjectConfig, run_id: str) -> dict[str, Any]:
+    from pyspark.sql import functions as F
+
     spark = get_spark(config, "inventory")
     backtest_table = spark.read.format("delta").load(
         str(table_path(config, "gold", "backtest_forecasts"))
