@@ -13,6 +13,7 @@ import streamlit as st
 from deltalake import DeltaTable
 
 from retail_forecasting.config import load_config
+from retail_forecasting.explainability import TreeShapAnalysis, analyze_tree_shap
 from retail_forecasting.forecasting.metrics import (
     summarize_bottom_rmsse_artifacts,
     summarize_backtest_points,
@@ -50,6 +51,15 @@ def read_delta(name: str) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def read_bottom_rmsse() -> pd.DataFrame:
     return summarize_bottom_rmsse_artifacts(CONFIG.paths.artifacts / "backtests")
+
+
+@st.cache_data(show_spinner=False)
+def read_shap_analysis(forecast_run_id: str) -> TreeShapAnalysis | None:
+    explanation_dir = CONFIG.paths.artifacts / "explainability" / forecast_run_id
+    attribution_files = sorted(explanation_dir.glob("*-shap-values.parquet"))
+    if not attribution_files:
+        return None
+    return analyze_tree_shap(pd.read_parquet(attribution_files[0]))
 
 
 @st.cache_data(show_spinner=False, ttl=60)
@@ -344,6 +354,107 @@ with explanation:
             (left if index == 0 else right).image(str(image), width="stretch")
     else:
         st.warning("Explanation artifacts are not available.")
+    shap_analysis = read_shap_analysis(run_id)
+    if shap_analysis is not None:
+        shap_summary = shap_analysis.summary
+        sample_rows = int(shap_summary["sample_rows"])
+        series_count = int(shap_summary["series_count"])
+        horizon_count = int(shap_summary["horizon_count"])
+        top_feature = str(shap_summary["top_feature"])
+        top_feature_horizon_count = int(shap_summary["top_feature_horizon_count"])
+        demand_history_share = float(shap_summary["demand_history_share"])
+        top_five_share = float(shap_summary["top_five_share"])
+        top_feature_share = float(shap_summary["top_feature_share"])
+        st.caption(
+            "SHAP values measure changes in predicted demand units relative to the model "
+            "baseline. They explain model behavior, not causal demand effects."
+        )
+        columns = st.columns(4)
+        columns[0].metric("Explained rows", f"{sample_rows:,}")
+        columns[1].metric("Covered SKUs", f"{series_count:,}")
+        columns[2].metric("Demand-history share", f"{demand_history_share:.1%}")
+        columns[3].metric("Top-five concentration", f"{top_five_share:.1%}")
+
+        st.markdown(
+            f"**Main finding.** `{top_feature}` is the strongest feature in "
+            f"{top_feature_horizon_count} of {horizon_count} horizons and contributes "
+            f"{top_feature_share:.1%} of total mean absolute attribution."
+        )
+        global_view = shap_analysis.global_importance.head(12).copy()
+        importance_chart = px.bar(
+            global_view.sort_values("mean_abs_shap"),
+            x="mean_abs_shap",
+            y="feature",
+            orientation="h",
+            color="feature_group",
+            labels={"mean_abs_shap": "Mean absolute SHAP", "feature": "Feature"},
+        )
+        importance_chart.update_layout(
+            legend_title_text="Feature family", margin=dict(l=0, r=0, t=16, b=0)
+        )
+        st.plotly_chart(importance_chart, width="stretch")
+
+        st.subheader("Stability across the 28-day horizon")
+        top_features = shap_analysis.global_importance.head(5)["feature"]
+        horizon_view = shap_analysis.horizon_importance.loc[
+            shap_analysis.horizon_importance["feature"].isin(top_features)
+        ]
+        horizon_chart = px.line(
+            horizon_view,
+            x="horizon",
+            y="mean_abs_shap",
+            color="feature",
+            markers=True,
+            labels={"mean_abs_shap": "Mean absolute SHAP", "horizon": "Horizon"},
+        )
+        horizon_chart.update_layout(
+            legend_title_text="Feature", margin=dict(l=0, r=0, t=16, b=0)
+        )
+        st.plotly_chart(horizon_chart, width="stretch")
+
+        st.subheader("Attribution magnitude by retail segment")
+        st.caption(
+            "Larger magnitude means that the model moves further from its baseline in that "
+            "segment. It does not mean that the segment has a larger forecast error."
+        )
+        st.dataframe(
+            shap_analysis.segment_importance,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "segment_type": "Segment type",
+                "segment": "Segment",
+                "rows": "Explained rows",
+                "series_count": "SKU-store count",
+                "mean_total_abs_shap": st.column_config.NumberColumn(
+                    "Mean total |SHAP|", format="%.3f"
+                ),
+                "top_feature": "Main driver",
+                "top_feature_mean_abs_shap": st.column_config.NumberColumn(
+                    "Main driver |SHAP|", format="%.3f"
+                ),
+            },
+        )
+
+        st.subheader("Largest local attribution profiles")
+        st.dataframe(
+            shap_analysis.local_explanations,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "series_id": "SKU-store",
+                "horizon": "Horizon",
+                "total_abs_shap": st.column_config.NumberColumn(
+                    "Total |SHAP|", format="%.3f"
+                ),
+                "top_driver": "Main driver",
+                "top_driver_shap": st.column_config.NumberColumn(
+                    "Driver SHAP", format="%+.3f"
+                ),
+                "direction": "Direction",
+                "top_three_drivers": "Three largest drivers",
+            },
+        )
 
 with inventory:
     st.subheader("Periodic review scenario")
