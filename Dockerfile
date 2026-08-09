@@ -34,9 +34,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install '.[tracking,trees]'
 
 FROM pipeline-base AS pipeline
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.5.1' && \
-    pip install '.[deep]'
 
 FROM pipeline-base AS pipeline-gpu
 RUN --mount=type=cache,target=/root/.cache/pip \

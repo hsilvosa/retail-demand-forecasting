@@ -139,36 +139,36 @@ continuous demand expectations; inventory rules decide any operational rounding.
 
 ## Reproduced dev results
 
-The following results were produced locally on 2026-08-08 from 900 stratified M5 SKU-store
+The following results were produced locally on 2026-08-09 from 900 stratified M5 SKU-store
 series. They describe the reproducible `dev` profile and are not presented as full-dataset M5
-benchmark scores. The backtest MLflow run is `848ba80d58624ee2b3e278fdbf8857b2`; the eligible
-finalization run is `1b0d3522c9c142239972de22405108bd`.
+benchmark scores. The promoted MLflow backtest run is `2dbd860a036d4cfca9b43ecf305b1f26`.
 
-| Model | WRMSSE | WAPE | MAE | RMSE | Bias | 90% coverage |
+| Model | WRMSSE | SKU-store-day WAPE | Store-day WAPE | MAE | Bias | 90% coverage |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| LightGBM | **0.8544** | **72.30%** | **1.051** | **2.456** | -8.34% | 90.98% |
-| Moving average | 1.0309 | 73.46% | 1.068 | 2.465 | **-1.87%** | 88.90% |
-| Seasonal naive | 1.2395 | 86.72% | 1.261 | 3.002 | -5.93% | 91.89% |
-| XGBoost | 1.3000 | 73.66% | 1.071 | 2.864 | -25.72% | 90.74% |
-| N-HiTS | 1.9210 | 107.34% | 1.563 | 6.721 | 25.13% | 86.00% |
+| XGBoost | **0.7827** | 72.21% | **15.15%** | 1.050 | **-0.82%** | 90.99% |
+| LightGBM | 0.8173 | **71.57%** | 15.18% | **1.041** | -3.38% | 90.54% |
+| Moving average | 1.0298 | 73.24% | 19.93% | 1.065 | -1.87% | 88.90% |
+| Seasonal naive | 1.0488 | 85.06% | 19.64% | 1.237 | -6.33% | 92.26% |
+| N-HiTS | 2.3129 | 113.21% | 46.83% | 1.651 | 31.65% | 86.38% |
 
-LightGBM achieved the best WRMSSE but failed the configured absolute-bias guardrail of 5%.
-Moving average was therefore registered as `retail-demand-forecaster` version 3 and promoted to
-the `champion` alias. LightGBM remains an accuracy candidate with global and local SHAP artifacts
-for diagnosis. The champion produced 25,200 bottom-level forecasts for `d_1942` through `d_1969`,
-representing 37,700 forecast units.
+Temporal demand-level calibration removed the systematic tree under-forecast without using the
+evaluation fold. XGBoost passed every promotion guardrail, was registered as
+`retail-demand-forecaster` version 5, and now carries the `champion` alias. The champion produced
+25,200 bottom-level forecasts for `d_1942` through `d_1969`, representing 34,642 median forecast
+units.
 
-The champion's 73.46% bottom-level WAPE is not production-quality. In the stored evaluation,
-57.2% of SKU-days have zero demand, but intermittency does not fully explain the weakness: WAPE
-is still 60.8% for the densest series. The current alias therefore identifies the best candidate
-under the configured promotion rules, not a model ready for operational deployment.
+The champion's 72.21% bottom-level WAPE is not production-quality. Its 15.15% store-day WAPE is
+appropriate for aggregate store planning, but it must not be presented as item-level accuracy.
+In the stored evaluation, 57.2% of SKU-days have zero demand, but intermittency does not fully
+explain the weakness: WAPE is still 57.9% for the densest series. The current alias therefore
+identifies the best candidate under the configured promotion rules, not a model ready for
+SKU-level operational deployment.
 
 The inventory simulation compared the champion with seasonal naive across 900 series and 28
-days. Moving average reached a 96.92% mean fill rate with 28.82 average units on hand and a total
-simulated cost of 14,347.41. Seasonal naive reached 97.23%, held 34.70 units on average, and cost
-14,069.04. Under the current cost assumptions, the simpler baseline is therefore slightly better
-for the simulated inventory objective despite its weaker WRMSSE. The final policy generated 900
-recommendations totaling 18,275 suggested units.
+days. XGBoost reached a 96.90% mean fill rate with 25.84 average units on hand and a total
+simulated cost of 14,912.75. Seasonal naive reached 97.18%, held 33.14 units on average, and cost
+15,213.73. Under the current cost assumptions, XGBoost reduces inventory and total cost with a
+small service-level tradeoff.
 
 ## Data and generated artifacts
 

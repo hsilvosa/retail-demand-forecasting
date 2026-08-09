@@ -14,6 +14,7 @@ from deltalake import DeltaTable
 
 from retail_forecasting.config import load_config
 from retail_forecasting.forecasting.metrics import (
+    summarize_bottom_rmsse_artifacts,
     summarize_backtest_points,
     summarize_wape_by_granularity,
 )
@@ -44,6 +45,11 @@ def read_delta(name: str) -> pd.DataFrame:
     if not (path / "_delta_log").exists():
         return pd.DataFrame()
     return DeltaTable(str(path)).to_pandas()
+
+
+@st.cache_data(show_spinner=False)
+def read_bottom_rmsse() -> pd.DataFrame:
+    return summarize_bottom_rmsse_artifacts(CONFIG.paths.artifacts / "backtests")
 
 
 @st.cache_data(show_spinner=False, ttl=60)
@@ -81,6 +87,11 @@ if not metrics.empty and not backtests.empty:
     metrics = metrics.drop(columns=point_columns, errors="ignore").merge(
         point_summary, on="model_name", how="left"
     )
+    bottom_rmsse = read_bottom_rmsse()
+    if not bottom_rmsse.empty:
+        metrics = metrics.drop(columns=["bottom_rmsse"], errors="ignore").merge(
+            bottom_rmsse, on="model_name", how="left"
+        )
     granularity_metrics = summarize_wape_by_granularity(backtests)
 else:
     granularity_metrics = pd.DataFrame()
@@ -229,6 +240,8 @@ with comparison:
             "WAPE": "wape",
             "MAE": "mae",
             "RMSE": "rmse",
+            "Bottom-level RMSSE": "bottom_rmsse",
+            "Mean pinball loss": "mean_pinball_loss",
             "Bias": "bias",
             "90% coverage": "coverage",
             "Interval width": "mean_interval_width",
@@ -270,18 +283,21 @@ with comparison:
             figure.add_hline(y=0.9, line_color="#6b665f", line_dash="dot")
         figure.update_layout(showlegend=False, margin=dict(l=0, r=0, t=16, b=0))
         st.plotly_chart(figure, width="stretch")
+        comparison_columns = [
+            "Model",
+            "mean_wrmsse",
+            "bottom_rmsse",
+            "wape",
+            "mae",
+            "rmse",
+            "mean_pinball_loss",
+            "bias",
+            "coverage",
+            "mean_interval_width",
+            "max_fold_degradation",
+        ]
         comparison_table = chart_data[
-            [
-                "Model",
-                "mean_wrmsse",
-                "wape",
-                "mae",
-                "rmse",
-                "bias",
-                "coverage",
-                "mean_interval_width",
-                "max_fold_degradation",
-            ]
+            [column for column in comparison_columns if column in chart_data]
         ].sort_values("mean_wrmsse")
         st.dataframe(
             comparison_table,
@@ -289,9 +305,15 @@ with comparison:
             hide_index=True,
             column_config={
                 "mean_wrmsse": st.column_config.NumberColumn("WRMSSE", format="%.4f"),
+                "bottom_rmsse": st.column_config.NumberColumn(
+                    "Bottom RMSSE", format="%.3f"
+                ),
                 "wape": st.column_config.NumberColumn("WAPE", format="percent"),
                 "mae": st.column_config.NumberColumn("MAE", format="%.3f"),
                 "rmse": st.column_config.NumberColumn("RMSE", format="%.3f"),
+                "mean_pinball_loss": st.column_config.NumberColumn(
+                    "Pinball loss", format="%.3f"
+                ),
                 "bias": st.column_config.NumberColumn("Bias", format="percent"),
                 "coverage": st.column_config.NumberColumn("Coverage", format="percent"),
                 "mean_interval_width": st.column_config.NumberColumn(
@@ -325,6 +347,37 @@ with explanation:
 
 with inventory:
     st.subheader("Periodic review scenario")
+    if not inventory_kpis.empty:
+        policy_comparison = (
+            inventory_kpis.groupby("model_name", as_index=False)
+            .agg(
+                fill_rate=("fill_rate", "mean"),
+                stockout_rate=("stockout_rate", "mean"),
+                average_inventory=("average_inventory", "mean"),
+                lost_sales_units=("lost_sales_units", "sum"),
+                total_cost=("total_cost", "sum"),
+            )
+            .sort_values("total_cost")
+        )
+        st.dataframe(
+            policy_comparison,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "model_name": "Policy model",
+                "fill_rate": st.column_config.NumberColumn("Fill rate", format="percent"),
+                "stockout_rate": st.column_config.NumberColumn(
+                    "Stockout rate", format="percent"
+                ),
+                "average_inventory": st.column_config.NumberColumn(
+                    "Average inventory", format="%.2f"
+                ),
+                "lost_sales_units": st.column_config.NumberColumn(
+                    "Lost sales", format="%.1f"
+                ),
+                "total_cost": st.column_config.NumberColumn("Total cost", format="$%.2f"),
+            },
+        )
     controls = st.columns(4)
     lead_time = controls[0].number_input("Lead time", 1, 28, CONFIG.inventory.lead_time_days)
     review_period = controls[1].number_input(

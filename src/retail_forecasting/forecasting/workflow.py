@@ -221,7 +221,11 @@ def _evaluate_fold(
     origin: int,
 ) -> tuple[dict[str, float], DataFrame]:
     metrics = point_metrics(
-        forecast["target"], forecast["yhat"], forecast["q05"], forecast["q95"]
+        forecast["target"],
+        forecast["yhat"],
+        forecast["q05"],
+        forecast["q95"],
+        forecast["q50"],
     )
     spark = daily.sparkSession
     spark_forecast = spark.createDataFrame(
@@ -241,6 +245,10 @@ def _evaluate_fold(
     )
     wrmsse, details = hierarchical_wrmsse_spark(daily, spark_forecast, origin)
     metrics["wrmsse"] = wrmsse
+    bottom_row = details.filter(F.col("level") == 12).agg(F.avg("rmsse").alias("rmsse")).first()
+    metrics["bottom_rmsse"] = (
+        float(bottom_row["rmsse"]) if bottom_row is not None else float("nan")
+    )
     return metrics, details
 
 
@@ -429,6 +437,10 @@ def run_forecasting(config: ProjectConfig, run_id: str) -> dict[str, Any]:
                 "mean_interval_width": float(
                     np.mean([row["mean_interval_width"] for row in rows])
                 ),
+                "mean_pinball_loss": float(
+                    np.mean([row["mean_pinball_loss"] for row in rows])
+                ),
+                "bottom_rmsse": float(np.mean([row["bottom_rmsse"] for row in rows])),
                 "max_fold_degradation": 0.0,
             }
         baseline_folds = np.asarray(

@@ -120,6 +120,18 @@ def model_finalize(profile: ProfileOption = "dev", run_id: str | None = None) ->
     typer.echo(json.dumps(result, indent=2))
 
 
+@model_app.command("evaluate")
+def model_evaluate(
+    profile: ProfileOption = "dev",
+    mlflow_run_id: Annotated[str | None, typer.Option("--mlflow-run-id")] = None,
+) -> None:
+    """Evaluate persisted forecasts and inventory results without model training."""
+    from retail_forecasting.evaluation import evaluate_stored_results
+
+    result = evaluate_stored_results(load_config(profile), mlflow_run_id)
+    typer.echo(json.dumps(result, indent=2))
+
+
 @forecast_app.command("run")
 def forecast_run(profile: ProfileOption = "dev", run_id: str | None = None) -> None:
     from retail_forecasting.forecasting.workflow import run_final_forecast
