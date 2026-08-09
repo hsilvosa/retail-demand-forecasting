@@ -190,6 +190,53 @@ explain the weakness: WAPE is still 57.9% for the densest series. The current al
 identifies the best candidate under the configured promotion rules, not a model ready for
 SKU-level operational deployment.
 
+### SHAP analysis of the champion
+
+TreeExplainer was evaluated on 2,000 persisted XGBoost explanation rows covering 815 of the 900
+development SKU-store series and all 28 forecast horizons. Mean absolute SHAP is expressed in
+forecast-demand units and measures movement relative to the model baseline. It explains the
+model's behavior, not a causal effect on demand.
+
+![XGBoost global SHAP importance](docs/assets/xgboost-shap-global.png)
+
+| Rank | Feature | Mean absolute SHAP | Importance share | Mean signed SHAP | Positive share |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | `rolling_mean_56` | 0.633 | 36.85% | -0.461 | 16.30% |
+| 2 | `rolling_mean_28` | 0.262 | 15.25% | -0.042 | 47.10% |
+| 3 | `target_wday` | 0.092 | 5.35% | -0.002 | 33.20% |
+| 4 | `rolling_std_56` | 0.083 | 4.83% | -0.043 | 43.85% |
+| 5 | `rolling_mean_7` | 0.077 | 4.48% | -0.026 | 28.40% |
+
+Demand-history features contribute 82.17% of total mean absolute attribution, calendar and
+horizon variables 11.91%, identifiers 3.16%, and price variables 2.76%. The five leading
+features concentrate 66.76% of all attribution. `rolling_mean_56` ranks first at every horizon,
+so the model's central behavior is stable across the 28-day forecast window rather than switching
+to identifiers or calendar shortcuts as the horizon grows.
+
+The beeswarm gives the important directional nuance. `rolling_mean_56` lowers the prediction
+relative to baseline in 83.70% of sampled rows, while its high-demand tail can add more than two
+units. This is consistent with a dataset dominated by intermittent low-demand rows and a smaller
+high-demand tail. `origin_day` has only 2.74% importance but is positive in 99.85% of rows, which
+is a drift warning: later origins systematically receive an uplift and need monitoring in
+production.
+
+Low identifier importance suggests that the global model is not primarily memorizing SKU and
+store codes. Low price importance is less reassuring because M5 lacks the promotion, display,
+availability, and stock signals required to separate price response from censored demand. The
+overall concentration in smoothed demand history explains the observed accuracy pattern: the
+model estimates aggregate demand level reasonably well but cannot reliably time sparse SKU-day
+spikes.
+
+Attribution magnitude is highest for HOBBIES at 2.000 mean total absolute SHAP, compared with
+1.848 for HOUSEHOLD and 1.505 for FOODS. WI_2 is the highest-magnitude store at 1.899, while CA_1
+is the lowest at 1.589. This does not rank forecast error; it shows where the model makes the
+largest adjustments away from its baseline and where local explanations deserve closer review.
+
+The editable [SHAP notebook](notebooks/08_explainability.ipynb) contains the global and grouped
+tables, importance stability across all horizons, ten high-attribution local SKU-store examples,
+interpretation, leakage review, and limitations. The dashboard exposes the same analysis under
+`Explainability`.
+
 The inventory simulation compared the champion with seasonal naive across 900 series and 28
 days. XGBoost reached a 96.90% mean fill rate with 25.84 average units on hand and a total
 simulated cost of 14,912.75. Seasonal naive reached 97.18%, held 33.14 units on average, and cost

@@ -46,9 +46,15 @@ model execution. Predictions outside the M5 calendar require a separate future-c
 
 ## Explainability
 
-LightGBM and XGBoost use SHAP TreeExplainer. N-HiTS uses Integrated Gradients. Explanations are
-diagnostic and do not establish causal effects. Identifier importance, unstable event effects,
-and attribution drift across horizons require review.
+LightGBM and XGBoost use SHAP TreeExplainer. The champion explanation sample contains 2,000 rows,
+815 SKU-store series, and all 28 horizons. Demand history accounts for 82.17% of attribution;
+`rolling_mean_56` accounts for 36.85% and ranks first at every horizon. Identifiers account for
+3.16% and prices for 2.76%. The concentration in rolling demand level is consistent with stronger
+aggregate accuracy and weak exact timing of intermittent SKU-day spikes.
+
+Explanations are diagnostic and do not establish causal effects. The nearly one-sided positive
+`origin_day` attribution is a temporal-drift warning. Identifier importance, unstable event
+effects, missing-price behavior, and attribution drift across horizons require ongoing review.
 
 ## Inventory use
 

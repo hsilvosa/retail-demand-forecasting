@@ -71,10 +71,26 @@ bias and improved hierarchy-weighted accuracy.
 
 ## Explainability
 
-TreeExplainer produces SHAP global and local attributions for both tree candidates. N-HiTS uses
-Integrated Gradients through NeuralForecast. Attribution values from different explanation
-methods are not compared numerically.
+TreeExplainer produces SHAP attributions for both tree candidates. The stored analysis ranks
+features by mean absolute SHAP, retains signed contributions, aggregates related features into
+demand-history, calendar, identifier, and price families, and recalculates importance for every
+forecast horizon. Local review selects the sampled SKU-horizon rows with the largest total
+absolute attribution and reports their three strongest signed drivers.
 
-Review focuses on stability across horizon, state, category, and demand intermittency. Unexpected
-dependence on identifiers, missing-price flags, or a single event family is treated as a model
-risk even when aggregate accuracy improves.
+The XGBoost champion analysis uses 2,000 sampled predictions, 815 SKU-store series, 52 features,
+and all 28 horizons. Demand history represents 82.17% of attribution and the top five features
+represent 66.76%. `rolling_mean_56` contributes 36.85% alone and remains the highest-importance
+feature at every horizon. Identifiers contribute only 3.16%, reducing the risk that the global
+model primarily memorizes product or store encodings. Price contributes 2.76%, which is a data
+limitation rather than evidence that demand is insensitive to price.
+
+SHAP values are associative model diagnostics, not causal effects. The positive direction of
+`origin_day` in 99.85% of sampled rows is monitored as a temporal-drift warning. Unexpected
+dependence on identifiers, missing-price flags, unavailable future fields, or a single event
+family remains a review failure even when aggregate accuracy improves.
+
+The persisted explanation contract now includes transformed `feature_*` values, `base_value`,
+and `model_output` alongside `shap_*` values. This supports dependence and waterfall plots in
+future runs. The already-completed champion artifact predates those additions, so its local table
+reports signed drivers but cannot reconstruct an exact waterfall without recomputing SHAP. Such
+recomputation does not require model training.
