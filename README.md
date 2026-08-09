@@ -95,6 +95,53 @@ Open the local services after the health checks pass:
 | Spark master | `http://localhost:8080` |
 | MinIO console | `http://localhost:9001` |
 
+## Dashboard walkthrough
+
+The Streamlit dashboard is the operational result of the pipeline, not a separate demo with
+mocked data. It reads the persisted Gold Delta tables and the explanation artifacts produced by
+the promoted run. The sidebar filters store, category, and SKU consistently across the views.
+
+| View | Question it answers | Main outputs |
+| --- | --- | --- |
+| Overview | Is the champion accurate enough for the intended planning level? | Champion, WRMSSE, store-day and SKU-day WAPE, coverage, bias, and store demand outlook |
+| Forecast explorer | What demand and uncertainty are expected for one SKU-store? | Daily q05, q50, and q95 for the next 28 days |
+| Model comparison | Why was this model selected? | Ten selectable metrics over seven business granularities, fold guardrails, and an MLflow run link |
+| Explainability | Which signals drive the forecast, and are they stable? | Global SHAP, horizon and retail-segment stability, plus local signed drivers |
+| Inventory | What replenishment action follows from the forecast? | Policy KPIs and a configurable `(R,S)` simulation with suggested order quantity |
+
+### Example 1: inspect a SKU forecast
+
+![Forecast explorer example](docs/assets/dashboard-forecast-example.png)
+
+For `FOODS_3_090_TX_2`, the selected XGBoost model forecasts 1,639.6 median units over 28 days,
+with a peak daily median of 91.2 units. The green band is the q05-q95 interval used by the
+inventory simulation. A planner can change store, category, and SKU from the sidebar and inspect
+the corresponding daily values in the table below the chart.
+
+### Example 2: compare candidates at the right planning level
+
+![Dashboard model comparison](docs/assets/dashboard-model-comparison.png)
+
+The comparison view separates hierarchy-wide quality from operational aggregation. XGBoost has
+the best WRMSSE at 0.783 and a store-day WAPE of 15.2%; LightGBM is almost tied at store level but
+has a weaker WRMSSE of 0.817. The dashboard can repeat the comparison for SKU-store-day,
+SKU-store-28-day, store-category, weekly, or total demand and switch among WRMSSE, RMSSE, WAPE,
+MAE, bias, coverage, interval width, pinball loss, and fold degradation.
+
+### Example 3: turn the forecast into an order
+
+![Dashboard inventory example](docs/assets/dashboard-inventory-example.png)
+
+Under the documented default assumptions, the XGBoost policy costs 14,913 with a 96.9% fill rate,
+while seasonal naive costs 15,214 with a 97.2% fill rate. For `FOODS_3_090_TX_2`, current on-hand
+inventory and reorder point are both approximately 376 units. The order-up-to level is 800, so
+the suggested order is 424 units. In the live view, lead time, review period, service level, and
+on-hand inventory can be changed to recalculate the decision for the selected SKU.
+
+These are portfolio simulations rather than recovered Walmart operating policies. The inventory
+view uses synthetic configurable assumptions because M5 does not contain actual stock, supplier,
+lead-time, pack-size, or ordering-cost histories.
+
 MinIO uses the local development credentials from `.env`: username `minio` and password
 `minio-local-only` with the default configuration. These credentials are only intended for the
 local portfolio environment.
