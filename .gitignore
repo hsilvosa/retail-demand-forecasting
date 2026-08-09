@@ -31,3 +31,6 @@ build/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local interview preparation
+docs/interview-preparation-es.md
