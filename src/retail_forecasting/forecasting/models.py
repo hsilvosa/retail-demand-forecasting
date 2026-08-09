@@ -39,6 +39,7 @@ class DirectTreeForecaster:
     encoder: OrdinalEncoder | None = None
     feature_names: list[str] = field(default_factory=list)
     categorical_features: list[str] = field(default_factory=list)
+    point_scale: float = 1.0
     calibrator: ResidualCalibrator = field(default_factory=ResidualCalibrator)
 
     @property
@@ -131,9 +132,15 @@ class DirectTreeForecaster:
     ) -> DirectTreeForecaster:
         if "target" not in train:
             raise ValueError("training data must contain target")
+        self.point_scale = 1.0
         self.model = self._make_model()
         self.model.fit(self._fit_transform(train), train["target"].to_numpy(dtype=float))
         calibration = validation if validation is not None and len(validation) else train
+        raw_calibration_prediction = self._predict_raw(calibration)
+        if validation is not None and len(validation):
+            self.point_scale = self._calibration_scale(
+                calibration["target"].to_numpy(dtype=float), raw_calibration_prediction
+            )
         calibration_prediction = self.predict_point(calibration)
         self.calibrator.fit(
             calibration["target"].to_numpy(dtype=float),
@@ -142,10 +149,20 @@ class DirectTreeForecaster:
         )
         return self
 
-    def predict_point(self, frame: pd.DataFrame) -> np.ndarray:
+    @staticmethod
+    def _calibration_scale(actual: np.ndarray, predicted: np.ndarray) -> float:
+        predicted_total = float(np.sum(predicted))
+        if predicted_total <= 0:
+            return 1.0
+        return float(np.clip(float(np.sum(actual)) / predicted_total, 0.8, 1.25))
+
+    def _predict_raw(self, frame: pd.DataFrame) -> np.ndarray:
         if self.model is None:
             raise RuntimeError("forecaster has not been fitted")
         return np.clip(np.asarray(self.model.predict(self._transform(frame)), dtype=float), 0, None)
+
+    def predict_point(self, frame: pd.DataFrame) -> np.ndarray:
+        return self._predict_raw(frame) * self.point_scale
 
     def predict(self, frame: pd.DataFrame) -> pd.DataFrame:
         point = self.predict_point(frame)

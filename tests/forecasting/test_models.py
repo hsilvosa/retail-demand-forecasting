@@ -2,6 +2,7 @@ import sys
 from types import ModuleType
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -61,3 +62,15 @@ def test_lightgbm_uses_native_categorical_dtypes() -> None:
     assert isinstance(transformed["item_id"].dtype, pd.CategoricalDtype)
     assert isinstance(transformed["store_id"].dtype, pd.CategoricalDtype)
     assert transformed["lag_1"].dtype == "float32"
+
+
+def test_point_scale_corrects_validation_level_with_bounds() -> None:
+    assert DirectTreeForecaster._calibration_scale(
+        np.array([2.0, 4.0]), np.array([1.0, 2.0])
+    ) == 1.25
+    assert DirectTreeForecaster._calibration_scale(
+        np.array([1.0, 2.0]), np.array([2.0, 4.0])
+    ) == 0.8
+    assert DirectTreeForecaster._calibration_scale(
+        np.array([1.0]), np.array([0.0])
+    ) == 1.0

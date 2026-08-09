@@ -6,6 +6,7 @@ from retail_forecasting.forecasting.metrics import (
     point_metrics,
     rmsse,
     summarize_backtest_points,
+    summarize_wape_by_granularity,
 )
 
 
@@ -78,3 +79,25 @@ def test_empty_backtests_return_an_empty_metric_contract() -> None:
 
     assert summary.empty
     assert "wape" in summary.columns
+
+
+def test_granularity_metrics_aggregate_before_calculating_wape() -> None:
+    backtests = pd.DataFrame(
+        {
+            "model_name": ["model_a"] * 4,
+            "fold_origin": [1] * 4,
+            "series_id": ["a", "b", "a", "b"],
+            "store_id": ["store"] * 4,
+            "cat_id": ["cat"] * 4,
+            "target_date": pd.to_datetime(["2025-01-01"] * 2 + ["2025-01-02"] * 2),
+            "horizon": [1, 1, 2, 2],
+            "target": [0.0, 2.0, 2.0, 0.0],
+            "yhat": [1.0, 1.0, 1.0, 1.0],
+        }
+    )
+
+    summary = summarize_wape_by_granularity(backtests).set_index("granularity")
+
+    assert np.isclose(summary.loc["sku_store_day", "wape"], 1.0)
+    assert np.isclose(summary.loc["store_day", "wape"], 0.0)
+    assert np.isclose(summary.loc["sku_store_28d", "wape"], 0.0)
