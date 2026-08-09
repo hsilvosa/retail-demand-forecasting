@@ -2,6 +2,7 @@ import sys
 from types import ModuleType
 from typing import Any
 
+import pandas as pd
 import pytest
 
 from retail_forecasting.forecasting import workflow
@@ -41,3 +42,22 @@ def test_only_xgboost_requests_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert workflow._tree_uses_gpu("xgboost")
     assert not workflow._tree_uses_gpu("lightgbm")
+
+
+def test_lightgbm_uses_native_categorical_dtypes() -> None:
+    frame = pd.DataFrame(
+        {
+            "series_id": ["a", "b"],
+            "item_id": ["item_1", "item_2"],
+            "store_id": ["store_1", "store_1"],
+            "horizon": [1, 2],
+            "lag_1": [0.0, 1.0],
+            "target": [0.0, 2.0],
+        }
+    )
+
+    transformed = DirectTreeForecaster("lightgbm")._fit_transform(frame)
+
+    assert isinstance(transformed["item_id"].dtype, pd.CategoricalDtype)
+    assert isinstance(transformed["store_id"].dtype, pd.CategoricalDtype)
+    assert transformed["lag_1"].dtype == "float32"

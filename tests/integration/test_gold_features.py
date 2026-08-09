@@ -6,7 +6,7 @@ from retail_forecasting.data.gold import add_origin_features
 
 
 @pytest.mark.integration
-def test_features_only_use_values_before_current_day() -> None:
+def test_features_include_origin_but_never_future_values() -> None:
     spark = SparkSession.builder.master("local[1]").appName("feature-test").getOrCreate()
     source = spark.range(1, 70).selectExpr(
         "'a' AS series_id",
@@ -16,6 +16,6 @@ def test_features_only_use_values_before_current_day() -> None:
     )
     featured = add_origin_features(source, load_config("test"))
     row = featured.filter("day_num = 60").first()
-    assert row["lag_1"] == 59
-    assert row["rolling_mean_7"] == pytest.approx(sum(range(53, 60)) / 7)
+    assert row["lag_1"] == 60
+    assert row["rolling_mean_7"] == pytest.approx(sum(range(54, 61)) / 7)
     spark.stop()

@@ -96,10 +96,11 @@ class DirectTreeForecaster:
                 features[self.categorical_features].fillna("__missing__").astype(str)
             )
             features.loc[:, self.categorical_features] = encoded
-        return cast(
+        numeric = cast(
             pd.DataFrame,
             features.apply(pd.to_numeric, errors="coerce").fillna(0).astype("float32"),
         )
+        return self._cast_lightgbm_categories(numeric)
 
     def _transform(self, frame: pd.DataFrame) -> pd.DataFrame:
         features = frame.reindex(columns=self.feature_names).copy()
@@ -108,10 +109,22 @@ class DirectTreeForecaster:
                 features[self.categorical_features].fillna("__missing__").astype(str)
             )
             features.loc[:, self.categorical_features] = encoded
-        return cast(
+        numeric = cast(
             pd.DataFrame,
             features.apply(pd.to_numeric, errors="coerce").fillna(0).astype("float32"),
         )
+        return self._cast_lightgbm_categories(numeric)
+
+    def _cast_lightgbm_categories(self, features: pd.DataFrame) -> pd.DataFrame:
+        if self.kind != "lightgbm" or self.encoder is None:
+            return features
+        native = features.copy()
+        for index, column in enumerate(self.categorical_features):
+            categories = [-1, *range(len(self.encoder.categories_[index]))]
+            native[column] = pd.Categorical(
+                native[column].round().astype("int32"), categories=categories
+            )
+        return native
 
     def fit(
         self, train: pd.DataFrame, validation: pd.DataFrame | None = None
