@@ -5,37 +5,36 @@ Databricks, Delta Lake, and MLflow. It ingests the M5 dataset, builds a medallio
 evaluates global forecasting models through temporal backtesting, explains their predictions,
 and turns the selected forecast into inventory decisions.
 
-## Resumen ejecutivo
+## Project scope
 
-Este proyecto reproduce en local un flujo productivo de forecasting retail. Los datos M5 se
-procesan con Spark y Delta Lake en capas Bronze, Silver y Gold. Los experimentos, modelos y
-promociones se gestionan con MLflow, PostgreSQL y MinIO. El sistema compara baselines,
-LightGBM y XGBoost, genera explicaciones y simula políticas de reposición con supuestos de
-inventario configurables. N-HiTS se conserva como experimento histórico, pero está desactivado
-porque fue el candidato más lento y el de peor calidad. La misma lógica se ejecuta desde CLI y
-notebooks documentados.
+The project reproduces a production-style retail forecasting workflow locally. Spark and Delta
+Lake process M5 data through Bronze, Silver, and Gold layers, while MLflow, PostgreSQL, and MinIO
+manage experiments, model promotion, and artifacts. The system compares transparent baselines,
+LightGBM, and XGBoost, generates explanations, and simulates replenishment policies under
+configurable inventory assumptions. N-HiTS is retained as a historical experiment but disabled
+because it was both the slowest and least accurate candidate. The same tested logic is available
+through the CLI and documented notebooks.
 
-### Cómo interpretar SKU-store-day y WAPE
+### Interpreting SKU-store-day and WAPE
 
-`SKU-store-day` significa las unidades de un producto concreto, en una tienda concreta, durante
-un día concreto. Es la granularidad necesaria para decidir la reposición de ese producto, pero
-también es la señal más ruidosa del proyecto. En el backtest, el 57,2% de esas observaciones son
-cero.
+`SKU-store-day` means the units of one specific product sold in one specific store on one day.
+This is the granularity required for product replenishment, but it is also the noisiest signal in
+the project. In the stored backtest, 57.2% of these observations are zero.
 
-WAPE divide la suma de errores absolutos entre la demanda total. Por ejemplo, para demanda
-`[0, 0, 0, 0, 0, 0, 7]` y predicción `[1, 1, 1, 1, 1, 1, 1]`, el error absoluto suma 12 y la
-demanda suma 7: WAPE es 171%. Por tanto, WAPE no está limitado al 100%. Una predicción suavizada
-se penaliza en los días sin venta y también cuando no anticipa el pico.
+WAPE divides the sum of absolute errors by total demand. For example, with actual demand
+`[0, 0, 0, 0, 0, 0, 7]` and predictions `[1, 1, 1, 1, 1, 1, 1]`, absolute error sums to 12 while
+demand sums to 7, producing a WAPE of 171%. WAPE is therefore not capped at 100%. A smoothed
+forecast is penalized on every zero-demand day and again when it misses the eventual spike.
 
-`Store-day` agrega todos los productos de la tienda antes de calcular el error. Las
-sobrepredicciones de unos productos compensan parcialmente las infrapredicciones de otros. Por
-eso el champion obtiene 15,15% en store-day y 72,21% en SKU-store-day. El primer valor sirve para
-planificación agregada de tienda; no demuestra precisión en la reposición de cada producto.
+`Store-day` aggregates every product in a store before calculating the error. Overprediction for
+some products can partially offset underprediction for others. The champion consequently obtains
+15.15% store-day WAPE but 72.21% SKU-store-day WAPE. The first figure supports aggregate store
+planning; it does not demonstrate accurate replenishment for each individual product.
 
-Para mejorar el nivel SKU-store-day faltarían, sobre todo, disponibilidad y roturas de stock,
-ventas perdidas, promociones y exposición, inventario y pedidos históricos, lanzamientos y bajas
-de surtido, sustitución entre productos y variables locales. M5 registra ventas, que no siempre
-son iguales a demanda: una venta cero puede significar falta de interés o falta de stock.
+Improving SKU-store-day accuracy would require availability and stockout signals, lost sales,
+promotions and display exposure, historical inventory and orders, assortment launches and exits,
+product substitution, and local demand drivers. M5 records sales rather than unconstrained
+demand, so a zero can indicate either no customer demand or no available stock.
 
 ## Architecture
 
