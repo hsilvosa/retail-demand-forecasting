@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -16,6 +17,7 @@ def point_metrics(
     predicted: Any,
     q05: Any | None = None,
     q95: Any | None = None,
+    q50: Any | None = None,
 ) -> dict[str, float]:
     y = np.asarray(actual, dtype=float)
     yhat = np.asarray(predicted, dtype=float)
@@ -32,13 +34,48 @@ def point_metrics(
         high = np.asarray(q95, dtype=float)
         result["coverage"] = float(np.mean((y >= low) & (y <= high)))
         result["mean_interval_width"] = float(np.mean(high - low))
+        result["pinball_q05"] = pinball_loss(y, low, 0.05)
+        result["pinball_q95"] = pinball_loss(y, high, 0.95)
+        if q50 is not None:
+            median = np.asarray(q50, dtype=float)
+            result["pinball_q50"] = pinball_loss(y, median, 0.5)
+            result["mean_pinball_loss"] = float(
+                np.mean(
+                    [
+                        result["pinball_q05"],
+                        result["pinball_q50"],
+                        result["pinball_q95"],
+                    ]
+                )
+            )
     return result
+
+
+def pinball_loss(actual: Any, predicted_quantile: Any, quantile: float) -> float:
+    """Return quantile loss in demand units; lower is better."""
+    if not 0 < quantile < 1:
+        raise ValueError("quantile must be strictly between zero and one")
+    y = np.asarray(actual, dtype=float)
+    prediction = np.asarray(predicted_quantile, dtype=float)
+    error = y - prediction
+    return float(np.mean(np.maximum(quantile * error, (quantile - 1) * error)))
 
 
 def summarize_backtest_points(backtests: pd.DataFrame) -> pd.DataFrame:
     """Average point and interval metrics across temporal folds for each model."""
-    required = {"model_name", "fold_origin", "target", "yhat", "q05", "q95"}
-    metric_names = ["mae", "rmse", "wape", "bias", "coverage", "mean_interval_width"]
+    required = {"model_name", "fold_origin", "target", "yhat", "q05", "q50", "q95"}
+    metric_names = [
+        "mae",
+        "rmse",
+        "wape",
+        "bias",
+        "coverage",
+        "mean_interval_width",
+        "pinball_q05",
+        "pinball_q50",
+        "pinball_q95",
+        "mean_pinball_loss",
+    ]
     missing = required.difference(backtests.columns)
     if missing:
         raise ValueError(f"backtests are missing columns: {sorted(missing)}")
@@ -51,7 +88,13 @@ def summarize_backtest_points(backtests: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "model_name": str(model_name),
-                **point_metrics(fold["target"], fold["yhat"], fold["q05"], fold["q95"]),
+                **point_metrics(
+                    fold["target"],
+                    fold["yhat"],
+                    fold["q05"],
+                    fold["q95"],
+                    fold["q50"],
+                ),
             }
         )
     return pd.DataFrame(rows).groupby("model_name", as_index=False)[metric_names].mean()
@@ -118,6 +161,27 @@ def summarize_wape_by_granularity(backtests: pd.DataFrame) -> pd.DataFrame:
         .groupby(["model_name", "granularity"], as_index=False)[metric_names]
         .mean()
     )
+
+
+def summarize_bottom_rmsse_artifacts(artifact_root: Path) -> pd.DataFrame:
+    """Average level-12 RMSSE from persisted fold hierarchy artifacts."""
+    rows: list[dict[str, float | str]] = []
+    for model_dir in sorted(artifact_root.glob("*")):
+        if not model_dir.is_dir():
+            continue
+        for path in sorted(model_dir.glob("d_*-wrmsse.parquet")):
+            details = pd.read_parquet(path, columns=["level", "rmsse"])
+            bottom = details.loc[details["level"] == 12, "rmsse"].astype(float)
+            finite = bottom[np.isfinite(bottom)]
+            rows.append(
+                {
+                    "model_name": model_dir.name,
+                    "bottom_rmsse": float(finite.mean()) if len(finite) else float("nan"),
+                }
+            )
+    if not rows:
+        return pd.DataFrame(columns=["model_name", "bottom_rmsse"])
+    return pd.DataFrame(rows).groupby("model_name", as_index=False)["bottom_rmsse"].mean()
 
 
 def rmsse(actual: Any, predicted: Any, history: Any) -> float:
