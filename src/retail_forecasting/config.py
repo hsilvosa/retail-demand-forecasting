@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -114,7 +115,14 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 def load_config(profile: str = "dev", config_dir: Path | None = None) -> ProjectConfig:
     """Load base settings and overlay a named execution profile."""
-    config_dir = config_dir or DEFAULT_CONFIG_DIR
+    if config_dir is None:
+        configured = os.getenv("RETAIL_CONFIG_DIR")
+        candidates = [Path(configured)] if configured else []
+        candidates.extend([Path.cwd() / "config", DEFAULT_CONFIG_DIR])
+        config_dir = next(
+            (candidate for candidate in candidates if (candidate / "base.yaml").is_file()),
+            candidates[0],
+        )
     base_path = config_dir / "base.yaml"
     profile_path = config_dir / f"{profile}.yaml"
     if not profile_path.exists():

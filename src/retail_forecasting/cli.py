@@ -112,6 +112,14 @@ def model_promote(profile: ProfileOption = "dev", run_id: str = "") -> None:
     typer.echo(json.dumps(result, indent=2))
 
 
+@model_app.command("finalize")
+def model_finalize(profile: ProfileOption = "dev", run_id: str | None = None) -> None:
+    from retail_forecasting.forecasting.workflow import finalize_from_backtests
+
+    result = finalize_from_backtests(load_config(profile), run_id or uuid.uuid4().hex[:12])
+    typer.echo(json.dumps(result, indent=2))
+
+
 @forecast_app.command("run")
 def forecast_run(profile: ProfileOption = "dev", run_id: str | None = None) -> None:
     from retail_forecasting.forecasting.workflow import run_final_forecast

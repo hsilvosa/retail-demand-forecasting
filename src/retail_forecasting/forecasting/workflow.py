@@ -25,6 +25,27 @@ from retail_forecasting.forecasting.models import (
 from retail_forecasting.tracking import log_forecaster, log_metrics, promote_candidate, tracking_run
 
 TREE_MODELS = {"lightgbm", "xgboost"}
+BACKTEST_COLUMNS = [
+    "series_id",
+    "item_id",
+    "dept_id",
+    "cat_id",
+    "store_id",
+    "state_id",
+    "origin_day",
+    "fold_origin",
+    "origin_date",
+    "day_num",
+    "horizon",
+    "target_date",
+    "model_name",
+    "target",
+    "yhat",
+    "q05",
+    "q50",
+    "q95",
+    "unit_price",
+]
 
 
 def _cuda_available() -> bool:
@@ -151,6 +172,32 @@ def _attach_predictions(
     identity["fold_origin"] = origin
     identity["day_num"] = identity["origin_day"] + identity["horizon"]
     return identity
+
+
+def _backtest_contract(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    backtests = pd.concat(frames, ignore_index=True)
+    backtests["target_date"] = pd.to_datetime(backtests["target_date"])
+    backtests["origin_date"] = backtests["target_date"] - pd.to_timedelta(
+        backtests["horizon"], unit="D"
+    )
+    tree_price = backtests.get("target_sell_price", pd.Series(index=backtests.index, dtype=float))
+    panel_price = backtests.get("sell_price", pd.Series(index=backtests.index, dtype=float))
+    backtests["unit_price"] = tree_price.combine_first(panel_price).fillna(0.0)
+    return backtests[BACKTEST_COLUMNS]
+
+
+def _select_winner(
+    config: ProjectConfig, summaries: dict[str, dict[str, float]]
+) -> str:
+    eligible = {
+        name: metrics
+        for name, metrics in summaries.items()
+        if abs(metrics["bias"]) <= config.mlflow.max_abs_bias
+        and config.mlflow.coverage_min <= metrics["coverage"] <= config.mlflow.coverage_max
+        and metrics["max_fold_degradation"] <= config.mlflow.max_fold_degradation
+    }
+    candidates = eligible or summaries
+    return min(candidates, key=lambda name: candidates[name]["mean_wrmsse"])
 
 
 def _evaluate_fold(
@@ -369,7 +416,7 @@ def run_forecasting(config: ProjectConfig, run_id: str) -> dict[str, Any]:
                 summaries[name]["max_fold_degradation"] = float(
                     max(0.0, np.max(candidate_folds / np.maximum(baseline_folds, 1e-12) - 1))
                 )
-        winner = min(summaries, key=lambda name: summaries[name]["mean_wrmsse"])
+        winner = _select_winner(config, summaries)
         log_metrics(summaries[winner])
         mlflow.log_dict(summaries, "evaluation/model_summary.json")
         final_model, final_predicted, model_input = _fit_final(
@@ -392,7 +439,7 @@ def run_forecasting(config: ProjectConfig, run_id: str) -> dict[str, Any]:
         version = log_forecaster(config, final_model, model_input, winner)
         paths = _write_forecast_tables(spark, config, final, run_id, winner, version)
         mlflow.set_tags({"winner": winner, "registered_model_version": version})
-    backtests = pd.concat(all_predictions, ignore_index=True)
+    backtests = _backtest_contract(all_predictions)
     write_delta(spark.createDataFrame(backtests), table_path(config, "gold", "backtest_forecasts"))
     metrics_rows = [
         {"model_name": name, **metrics} for name, metrics in summaries.items()
@@ -456,6 +503,66 @@ def run_final_forecast(config: ProjectConfig, run_id: str) -> dict[str, Any]:
         "model_version": str(champion.version),
         "forecasts": paths,
         "status": "loaded_champion_alias",
+    }
+
+
+def finalize_from_backtests(config: ProjectConfig, run_id: str) -> dict[str, Any]:
+    """Register and forecast with the best eligible model from persisted backtests."""
+    import mlflow
+
+    spark = get_spark(config, "finalize")
+    features = spark.read.format("delta").load(
+        str(table_path(config, "gold", "training_features"))
+    ).cache()
+    future = spark.read.format("delta").load(
+        str(table_path(config, "gold", "forecast_features"))
+    ).drop("_run_id").toPandas()
+    daily = spark.read.format("delta").load(
+        str(table_path(config, "silver", "sales_daily"))
+    ).cache()
+    metric_rows = spark.read.format("delta").load(
+        str(table_path(config, "gold", "model_metrics"))
+    ).toPandas()
+    summaries = {
+        str(row["model_name"]): {
+            "mean_wrmsse": float(row["mean_wrmsse"]),
+            "bias": float(row["bias"]),
+            "coverage": float(row["coverage"]),
+            "max_fold_degradation": float(row["max_fold_degradation"]),
+        }
+        for _, row in metric_rows.iterrows()
+    }
+    winner = _select_winner(config, summaries)
+    with tracking_run(config, run_id) as parent_run:
+        log_metrics(summaries[winner])
+        mlflow.log_dict(summaries, "evaluation/model_summary.json")
+        final_model, final_predicted, model_input = _fit_final(
+            winner, features, future, daily, config, {}
+        )
+        final = _attach_predictions(
+            future.assign(target=np.nan),
+            final_predicted,
+            winner,
+            config.data.forecast_origin_day,
+        )
+        final["origin_date"] = pd.to_datetime(final["origin_date"]).dt.date
+        final["target_date"] = pd.to_datetime(final["target_date"]).dt.date
+        version = log_forecaster(config, final_model, model_input, winner)
+        paths = _write_forecast_tables(spark, config, final, run_id, winner, version)
+        mlflow.set_tags({"winner": winner, "registered_model_version": version})
+        parent_run_id = parent_run.info.run_id
+    promotion = promote_candidate(config, parent_run_id)
+    features.unpersist()
+    daily.unpersist()
+    spark.stop()
+    return {
+        "run_id": run_id,
+        "mlflow_run_id": parent_run_id,
+        "winner": winner,
+        "metrics": summaries[winner],
+        "model_version": version,
+        "forecasts": paths,
+        "promotion": promotion,
     }
 
 

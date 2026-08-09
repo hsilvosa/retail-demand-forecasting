@@ -94,6 +94,7 @@ retail-forecast pipeline run --profile dev [--from silver] [--to forecasting] [-
 retail-forecast pipeline status --profile dev
 retail-forecast model backtest --profile dev
 retail-forecast model train --profile dev
+retail-forecast model finalize --profile dev
 retail-forecast model promote --profile dev --run-id <mlflow-run-id>
 retail-forecast forecast run --profile dev
 retail-forecast inventory simulate --profile dev
@@ -120,6 +121,34 @@ RMSSE, and 90 percent interval coverage provide diagnostic context.
 The Registry alias `champion` is updated only when the candidate improves WRMSSE by at least one
 percent and satisfies the configured bias, coverage, and fold guardrails. The forecast job writes
 continuous demand expectations; inventory rules decide any operational rounding.
+
+## Reproduced dev results
+
+The following results were produced locally on 2026-08-08 from 900 stratified M5 SKU-store
+series. They describe the reproducible `dev` profile and are not presented as full-dataset M5
+benchmark scores. The backtest MLflow run is `848ba80d58624ee2b3e278fdbf8857b2`; the eligible
+finalization run is `1b0d3522c9c142239972de22405108bd`.
+
+| Model | Mean WRMSSE | Bias | 90% coverage | Maximum fold degradation |
+| --- | ---: | ---: | ---: | ---: |
+| LightGBM | **0.8544** | -8.34% | 90.98% | 0.00% |
+| Moving average | 1.0309 | **-1.87%** | 88.90% | 0.00% |
+| Seasonal naive | 1.2395 | -5.93% | 91.89% | 0.00% |
+| XGBoost | 1.3000 | -25.72% | 90.74% | 9.11% |
+| N-HiTS | 1.9210 | 25.13% | 86.00% | 116.15% |
+
+LightGBM achieved the best WRMSSE but failed the configured absolute-bias guardrail of 5%.
+Moving average was therefore registered as `retail-demand-forecaster` version 3 and promoted to
+the `champion` alias. LightGBM remains an accuracy candidate with global and local SHAP artifacts
+for diagnosis. The champion produced 25,200 bottom-level forecasts for `d_1942` through `d_1969`,
+representing 37,700 forecast units.
+
+The inventory simulation compared the champion with seasonal naive across 900 series and 28
+days. Moving average reached a 96.92% mean fill rate with 28.82 average units on hand and a total
+simulated cost of 14,347.41. Seasonal naive reached 97.23%, held 34.70 units on average, and cost
+14,069.04. Under the current cost assumptions, the simpler baseline is therefore slightly better
+for the simulated inventory objective despite its weaker WRMSSE. The final policy generated 900
+recommendations totaling 18,275 suggested units.
 
 ## Data and generated artifacts
 

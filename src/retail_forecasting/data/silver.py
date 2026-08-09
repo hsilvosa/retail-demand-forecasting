@@ -8,7 +8,7 @@ from typing import Any
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
-from retail_forecasting.config import PROJECT_ROOT, ProjectConfig
+from retail_forecasting.config import ProjectConfig
 from retail_forecasting.data.quality import validate_silver_sales
 from retail_forecasting.data.spark import get_spark, table_path, write_delta
 
@@ -58,7 +58,8 @@ def run_silver(config: ProjectConfig, run_id: str) -> dict[str, Any]:
     sales.createOrReplaceTempView("normalized_sales")
     calendar.createOrReplaceTempView("silver_calendar")
     prices.createOrReplaceTempView("silver_prices")
-    silver_sql = (PROJECT_ROOT / "sql/silver_sales_daily.sql").read_text(encoding="utf-8")
+    sql_path = config.paths.source.parent / "sql" / "silver_sales_daily.sql"
+    silver_sql = sql_path.read_text(encoding="utf-8")
     daily = spark.sql(silver_sql).withColumn("_run_id", F.lit(run_id))
     quality = validate_silver_sales(daily)
     if not quality["valid"]:
