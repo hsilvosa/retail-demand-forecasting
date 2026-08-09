@@ -16,10 +16,18 @@ The model version carrying the `champion` alias passed the configured WRMSSE imp
 coverage, and fold guardrails at promotion time. Exact results belong to that MLflow version and
 must not be copied from a different run.
 
-The reproduced development champion has 73.46% bottom-level WAPE and must be treated as a
-benchmark requiring improvement, not as a production-ready forecaster. More than half of evaluated
-SKU-days have zero demand, while dense-series WAPE remains 60.8%; the error is therefore not
-attributable to intermittency alone.
+The reproduced development champion has 72.21% SKU-store-day WAPE and 15.15% store-day WAPE.
+The latter supports aggregate store planning, but aggregation does not make the item-level result
+production-ready. More than half of evaluated SKU-days have zero demand, while dense-series WAPE
+remains 57.9%; the error is therefore not attributable to intermittency alone.
+
+An August 2026 improvement study tested Tweedie variance powers, Poisson, Huber, L1, median
+quantile regression, native LightGBM categories, a hurdle occurrence/amount model, five-week
+seasonal means, blends, and temporal calibration by series and hierarchy. On the untouched
+`d_1913` fold, L1 reached 64.81% WAPE only by producing -33.82% bias. The best bias-aware
+specialized candidates remained near 69%. None met a 20% bottom-level target. A separate
+leakage-safe level calibration brought XGBoost bias from -5.88% to -0.82%; the resulting model
+reached WRMSSE 0.7827, passed all promotion guardrails, and became Registry version 5.
 
 ## Limitations
 
