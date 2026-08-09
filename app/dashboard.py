@@ -127,6 +127,11 @@ with overview:
     columns[1].metric("MAE", f"{champion_metric('mae'):.3f}")
     columns[2].metric("RMSE", f"{champion_metric('rmse'):.3f}")
     columns[3].metric("Bias", f"{champion_metric('bias'):.1%}")
+    if champion_metric("wape") > 0.5:
+        st.warning(
+            f"Bottom-level WAPE is {champion_metric('wape'):.1%}. "
+            "This development champion is a benchmark that requires further improvement."
+        )
     st.subheader("Demand outlook")
     summary = (
         store_forecasts.groupby(["target_date", "cat_id"], as_index=False)["q50"].sum()

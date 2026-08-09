@@ -44,6 +44,7 @@ class DataConfig(BaseModel):
 class FeatureConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     lags: list[int]
+    target_lags: list[int]
     rolling_windows: list[int]
 
 
@@ -100,6 +101,8 @@ class ProjectConfig(BaseModel):
             raise ValueError("coverage_min cannot exceed coverage_max")
         if sorted(self.models.quantiles) != self.models.quantiles:
             raise ValueError("model quantiles must be sorted")
+        if min(self.features.target_lags) < self.data.horizon:
+            raise ValueError("target_lags must be at least as large as the forecast horizon")
         return self
 
 
