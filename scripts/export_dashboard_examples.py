@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ import pandas as pd
 
 from retail_forecasting.config import load_config
 from retail_forecasting.data.spark import get_spark, table_path
+from retail_forecasting.explainability import analyze_tree_shap
 from retail_forecasting.forecasting.metrics import summarize_wape_by_granularity
 
 matplotlib.use("Agg")
@@ -184,6 +186,106 @@ def _inventory_example(
     }
 
 
+def _shap_examples(
+    explanation_dir: Path, output_dir: Path
+) -> dict[str, Any]:
+    attribution_paths = sorted(explanation_dir.glob("*-shap-values.parquet"))
+    beeswarm_paths = sorted(explanation_dir.glob("*-shap-beeswarm.png"))
+    if not attribution_paths or not beeswarm_paths:
+        raise FileNotFoundError(f"Incomplete SHAP artifacts in {explanation_dir}")
+
+    attributions = pd.read_parquet(attribution_paths[0])
+    analysis = analyze_tree_shap(attributions, top_n=20, local_n=10)
+    shutil.copy2(beeswarm_paths[0], output_dir / "xgboost-shap-beeswarm.png")
+
+    top_features = analysis.global_importance.head(5)["feature"].tolist()
+    horizon = analysis.horizon_importance.loc[
+        analysis.horizon_importance["feature"].isin(top_features)
+    ]
+    categories = analysis.segment_importance.loc[
+        analysis.segment_importance["segment_type"] == "category"
+    ].sort_values("mean_total_abs_shap")
+
+    figure, axes = plt.subplots(1, 2, figsize=(11.2, 4.5))
+    for feature in top_features:
+        feature_horizon = horizon.loc[horizon["feature"] == feature]
+        axes[0].plot(
+            feature_horizon["horizon"],
+            feature_horizon["mean_abs_shap"],
+            marker="o",
+            markersize=3,
+            linewidth=1.8,
+            label=feature,
+        )
+    axes[0].set_title("Importance across the 28-day horizon", loc="left", weight="bold")
+    axes[0].set_xlabel("Forecast horizon")
+    axes[0].set_ylabel("Mean absolute SHAP")
+    axes[0].grid(axis="y", alpha=0.2)
+    axes[0].legend(frameon=False, fontsize=8, ncol=2)
+
+    axes[1].barh(
+        categories["segment"],
+        categories["mean_total_abs_shap"],
+        color=[BLUE, AMBER, GREEN],
+    )
+    axes[1].set_title("Attribution magnitude by category", loc="left", weight="bold")
+    axes[1].set_xlabel("Mean total absolute SHAP")
+    axes[1].grid(axis="x", alpha=0.2)
+    for index, value in enumerate(categories["mean_total_abs_shap"]):
+        axes[1].text(float(value) + 0.025, index, f"{value:.3f}", va="center")
+    figure.suptitle("SHAP stability and retail-segment diagnostics", weight="bold")
+    figure.tight_layout()
+    _save(figure, output_dir / "dashboard-shap-diagnostics.png")
+
+    local = analysis.local_explanations.iloc[0]
+    local_rows = attributions.loc[
+        (attributions["series_id"] == local["series_id"])
+        & (attributions["horizon"] == local["horizon"])
+    ]
+    local_values = local_rows.filter(regex=r"^shap_").iloc[0]
+    strongest = local_values.loc[local_values.abs().nlargest(10).index].sort_values()
+    local_features = [feature.removeprefix("shap_") for feature in strongest.index]
+    local_colors = [GREEN if value > 0 else RED for value in strongest]
+
+    figure, axis = plt.subplots(figsize=(9.8, 4.8))
+    axis.barh(local_features, strongest, color=local_colors)
+    axis.axvline(0, color=GRAY, linewidth=1)
+    axis.set_title(
+        f"Local SHAP example: {local['series_id']}, horizon {local['horizon']}",
+        loc="left",
+        weight="bold",
+    )
+    axis.set_xlabel("Signed contribution to forecast units")
+    axis.set_xlim(
+        min(-0.3, float(strongest.min()) * 2.0),
+        float(strongest.max()) * 1.12,
+    )
+    axis.grid(axis="x", alpha=0.2)
+    for index, value in enumerate(strongest):
+        if value > 0:
+            axis.text(float(value) + 0.025, index, f"{value:+.3f}", va="center")
+        else:
+            axis.text(
+                float(value) - 0.015,
+                index,
+                f"{value:+.3f}",
+                va="center",
+                ha="right",
+                color=RED,
+            )
+    figure.tight_layout()
+    _save(figure, output_dir / "dashboard-shap-local-example.png")
+    return {
+        "sample_rows": analysis.summary["sample_rows"],
+        "series_count": analysis.summary["series_count"],
+        "top_feature": analysis.summary["top_feature"],
+        "top_feature_horizon_count": analysis.summary["top_feature_horizon_count"],
+        "local_series_id": str(local["series_id"]),
+        "local_horizon": int(local["horizon"]),
+        "local_drivers": str(local["top_three_drivers"]),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--profile", default="dev")
@@ -206,6 +308,12 @@ def main() -> None:
         "forecast": _forecast_example(forecasts, args.output_dir),
         "models": _model_comparison(model_metrics, backtests, args.output_dir),
         "inventory": _inventory_example(inventory_kpis, recommendations, args.output_dir),
+        "shap": _shap_examples(
+            config.paths.artifacts
+            / "explainability"
+            / str(forecasts["run_id"].iloc[0]),
+            args.output_dir,
+        ),
     }
     print(json.dumps(manifest, indent=2))
 
