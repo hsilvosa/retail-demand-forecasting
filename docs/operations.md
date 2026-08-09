@@ -6,6 +6,10 @@ Create `.env` from `.env.example`, start PostgreSQL, MinIO, MLflow, and Spark, t
 The full profile uses the `pipeline-gpu` service and stops immediately when CUDA is unavailable.
 The default development services are CPU-only and do not download CUDA dependencies.
 
+The default local MinIO console is available at `http://localhost:9001`. Sign in with username
+`minio` and password `minio-local-only`, unless those values were changed in `.env`. They are
+development-only credentials and must not be reused outside this local environment.
+
 ## Recovery
 
 Use `pipeline status` to inspect stage manifests. A pending stage can be rerun from that point with
@@ -28,3 +32,7 @@ GPU container and verify Docker Desktop GPU integration.
 Every MLflow parent run stores the resolved configuration, Git SHA, profile, nested fold runs,
 metrics, tuning parameters, model artifact, and explanations. Delta output rows carry the pipeline
 run ID. Source checksums connect Bronze data to the original CSV files.
+
+The development experiment is named `M5 Retail Forecasting - DEV`. Use the `CHAMPION` run for the
+registered production candidate and the `OFFICIAL` run for the full temporal backtest. Runs marked
+`FAILED` or `SUPERSEDED` are retained for traceability but are not current results.

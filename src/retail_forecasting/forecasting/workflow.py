@@ -48,6 +48,17 @@ BACKTEST_COLUMNS = [
 ]
 
 
+def _model_label(name: str) -> str:
+    labels = {
+        "lightgbm": "LightGBM",
+        "xgboost": "XGBoost",
+        "nhits": "N-HiTS",
+        "moving_average": "Moving Average",
+        "seasonal_naive": "Seasonal Naive",
+    }
+    return labels.get(name, name.replace("_", " ").title())
+
+
 def _cuda_available() -> bool:
     try:
         import torch
@@ -365,13 +376,16 @@ def run_forecasting(config: ProjectConfig, run_id: str) -> dict[str, Any]:
     fold_metrics: dict[str, list[dict[str, float]]] = defaultdict(list)
     all_predictions: list[pd.DataFrame] = []
     parent_run_id = ""
-    with tracking_run(config, run_id) as parent_run:
+    parent_name = f"Official Backtest | {config.profile.upper()} | {run_id}"
+    with tracking_run(config, parent_name) as parent_run:
+        mlflow.set_tags({"workflow": "temporal_backtest", "result_role": "official"})
         parent_run_id = parent_run.info.run_id
         mlflow.log_dict(tuned, "tuning/best_parameters.json")
         for origin in config.data.backtest_origins:
             train, evaluation = _split_fold(features, origin)
             for name in config.models.names:
-                with mlflow.start_run(run_name=f"{name}-d_{origin}", nested=True):
+                child_name = f"Fold d_{origin} | {_model_label(name)}"
+                with mlflow.start_run(run_name=child_name, nested=True):
                     if name in {"seasonal_naive", "moving_average"}:
                         _, predicted = _baseline_predictions(name, train, evaluation)
                         evaluated_rows = evaluation
@@ -533,7 +547,9 @@ def finalize_from_backtests(config: ProjectConfig, run_id: str) -> dict[str, Any
         for _, row in metric_rows.iterrows()
     }
     winner = _select_winner(config, summaries)
-    with tracking_run(config, run_id) as parent_run:
+    parent_name = f"Champion Selection | {config.profile.upper()} | {run_id}"
+    with tracking_run(config, parent_name) as parent_run:
+        mlflow.set_tags({"workflow": "champion_selection", "result_role": "official"})
         log_metrics(summaries[winner])
         mlflow.log_dict(summaries, "evaluation/model_summary.json")
         final_model, final_predicted, model_input = _fit_final(
@@ -581,7 +597,10 @@ def run_single_model(
     )
     daily = spark.read.format("delta").load(str(table_path(config, "silver", "sales_daily")))
     train, evaluation = _split_fold(features, fold_origin)
-    with tracking_run(config, run_id):
+    run_name = (
+        f"Single Model | {_model_label(model_name)} | d_{fold_origin} | {run_id}"
+    )
+    with tracking_run(config, run_name):
         if model_name in {"seasonal_naive", "moving_average"}:
             _, predicted = _baseline_predictions(model_name, train, evaluation)
             evaluated_rows = evaluation

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from urllib.parse import urlencode
+from urllib.request import urlopen
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -36,6 +40,29 @@ def read_delta(name: str) -> pd.DataFrame:
     if not (path / "_delta_log").exists():
         return pd.DataFrame()
     return DeltaTable(str(path)).to_pandas()
+
+
+@st.cache_data(show_spinner=False, ttl=60)
+def champion_mlflow_location() -> tuple[str, str] | None:
+    base_url = CONFIG.mlflow.tracking_uri.rstrip("/")
+    alias_query = urlencode(
+        {"name": CONFIG.mlflow.registered_model, "alias": "champion"}
+    )
+    try:
+        with urlopen(
+            f"{base_url}/api/2.0/mlflow/registered-models/alias?{alias_query}",
+            timeout=3,
+        ) as response:
+            model_version = json.load(response)["model_version"]
+        run_id = model_version["run_id"]
+        run_query = urlencode({"run_id": run_id})
+        with urlopen(
+            f"{base_url}/api/2.0/mlflow/runs/get?{run_query}", timeout=3
+        ) as response:
+            experiment_id = json.load(response)["run"]["info"]["experiment_id"]
+    except (KeyError, OSError, ValueError):
+        return None
+    return experiment_id, run_id
 
 
 forecasts = read_delta("forecasts_bottom")
@@ -157,7 +184,15 @@ with comparison:
         figure.update_layout(showlegend=False, margin=dict(l=0, r=0, t=16, b=0))
         st.plotly_chart(figure, width="stretch")
         st.dataframe(metrics, width="stretch", hide_index=True)
-    st.link_button("Open MLflow run", f"http://localhost:5000/#/experiments/0/runs/{run_id}")
+    mlflow_location = champion_mlflow_location()
+    if mlflow_location:
+        experiment_id, mlflow_run_id = mlflow_location
+        st.link_button(
+            "Open champion in MLflow",
+            f"http://localhost:5000/#/experiments/{experiment_id}/runs/{mlflow_run_id}",
+        )
+    else:
+        st.caption("The MLflow champion link is temporarily unavailable.")
 
 with explanation:
     st.subheader("Feature attribution")

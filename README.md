@@ -70,6 +70,14 @@ Open the local services after the health checks pass:
 | Spark master | `http://localhost:8080` |
 | MinIO console | `http://localhost:9001` |
 
+MinIO uses the local development credentials from `.env`: username `minio` and password
+`minio-local-only` with the default configuration. These credentials are only intended for the
+local portfolio environment.
+
+In MLflow, open the `M5 Retail Forecasting - DEV` experiment. The authoritative results are the
+runs prefixed with `OFFICIAL` and `CHAMPION`; incomplete and earlier retry runs are explicitly
+labelled `FAILED` or `SUPERSEDED`.
+
 The pipeline is restartable. A completed stage is skipped when its configuration fingerprint has
 not changed. Use `--force` only when a deliberate rebuild is required.
 

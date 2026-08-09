@@ -34,7 +34,7 @@ models:
   require_gpu: false
 mlflow:
   tracking_uri: http://mlflow:5000
-  experiment_prefix: retail-demand
+  experiment_prefix: M5 Retail Forecasting
   registered_model: retail-demand-forecaster
   improvement_threshold: 0.01
   max_abs_bias: 0.05
