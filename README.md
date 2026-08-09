@@ -5,37 +5,36 @@ Databricks, Delta Lake, and MLflow. It ingests the M5 dataset, builds a medallio
 evaluates global forecasting models through temporal backtesting, explains their predictions,
 and turns the selected forecast into inventory decisions.
 
-## Resumen ejecutivo
+## Project scope
 
-Este proyecto reproduce en local un flujo productivo de forecasting retail. Los datos M5 se
-procesan con Spark y Delta Lake en capas Bronze, Silver y Gold. Los experimentos, modelos y
-promociones se gestionan con MLflow, PostgreSQL y MinIO. El sistema compara baselines,
-LightGBM y XGBoost, genera explicaciones y simula políticas de reposición con supuestos de
-inventario configurables. N-HiTS se conserva como experimento histórico, pero está desactivado
-porque fue el candidato más lento y el de peor calidad. La misma lógica se ejecuta desde CLI y
-notebooks documentados.
+The project reproduces a production-style retail forecasting workflow locally. Spark and Delta
+Lake process M5 data through Bronze, Silver, and Gold layers, while MLflow, PostgreSQL, and MinIO
+manage experiments, model promotion, and artifacts. The system compares transparent baselines,
+LightGBM, and XGBoost, generates explanations, and simulates replenishment policies under
+configurable inventory assumptions. N-HiTS is retained as a historical experiment but disabled
+because it was both the slowest and least accurate candidate. The same tested logic is available
+through the CLI and documented notebooks.
 
-### Cómo interpretar SKU-store-day y WAPE
+### Interpreting SKU-store-day and WAPE
 
-`SKU-store-day` significa las unidades de un producto concreto, en una tienda concreta, durante
-un día concreto. Es la granularidad necesaria para decidir la reposición de ese producto, pero
-también es la señal más ruidosa del proyecto. En el backtest, el 57,2% de esas observaciones son
-cero.
+`SKU-store-day` means the units of one specific product sold in one specific store on one day.
+This is the granularity required for product replenishment, but it is also the noisiest signal in
+the project. In the stored backtest, 57.2% of these observations are zero.
 
-WAPE divide la suma de errores absolutos entre la demanda total. Por ejemplo, para demanda
-`[0, 0, 0, 0, 0, 0, 7]` y predicción `[1, 1, 1, 1, 1, 1, 1]`, el error absoluto suma 12 y la
-demanda suma 7: WAPE es 171%. Por tanto, WAPE no está limitado al 100%. Una predicción suavizada
-se penaliza en los días sin venta y también cuando no anticipa el pico.
+WAPE divides the sum of absolute errors by total demand. For example, with actual demand
+`[0, 0, 0, 0, 0, 0, 7]` and predictions `[1, 1, 1, 1, 1, 1, 1]`, absolute error sums to 12 while
+demand sums to 7, producing a WAPE of 171%. WAPE is therefore not capped at 100%. A smoothed
+forecast is penalized on every zero-demand day and again when it misses the eventual spike.
 
-`Store-day` agrega todos los productos de la tienda antes de calcular el error. Las
-sobrepredicciones de unos productos compensan parcialmente las infrapredicciones de otros. Por
-eso el champion obtiene 15,15% en store-day y 72,21% en SKU-store-day. El primer valor sirve para
-planificación agregada de tienda; no demuestra precisión en la reposición de cada producto.
+`Store-day` aggregates every product in a store before calculating the error. Overprediction for
+some products can partially offset underprediction for others. The champion consequently obtains
+15.15% store-day WAPE but 72.21% SKU-store-day WAPE. The first figure supports aggregate store
+planning; it does not demonstrate accurate replenishment for each individual product.
 
-Para mejorar el nivel SKU-store-day faltarían, sobre todo, disponibilidad y roturas de stock,
-ventas perdidas, promociones y exposición, inventario y pedidos históricos, lanzamientos y bajas
-de surtido, sustitución entre productos y variables locales. M5 registra ventas, que no siempre
-son iguales a demanda: una venta cero puede significar falta de interés o falta de stock.
+Improving SKU-store-day accuracy would require availability and stockout signals, lost sales,
+promotions and display exposure, historical inventory and orders, assortment launches and exits,
+product substitution, and local demand drivers. M5 records sales rather than unconstrained
+demand, so a zero can indicate either no customer demand or no available stock.
 
 ## Architecture
 
@@ -94,6 +93,53 @@ Open the local services after the health checks pass:
 | JupyterLab | `http://localhost:8888` |
 | Spark master | `http://localhost:8080` |
 | MinIO console | `http://localhost:9001` |
+
+## Dashboard walkthrough
+
+The Streamlit dashboard is the operational result of the pipeline, not a separate demo with
+mocked data. It reads the persisted Gold Delta tables and the explanation artifacts produced by
+the promoted run. The sidebar filters store, category, and SKU consistently across the views.
+
+| View | Question it answers | Main outputs |
+| --- | --- | --- |
+| Overview | Is the champion accurate enough for the intended planning level? | Champion, WRMSSE, store-day and SKU-day WAPE, coverage, bias, and store demand outlook |
+| Forecast explorer | What demand and uncertainty are expected for one SKU-store? | Daily q05, q50, and q95 for the next 28 days |
+| Model comparison | Why was this model selected? | Ten selectable metrics over seven business granularities, fold guardrails, and an MLflow run link |
+| Explainability | Which signals drive the forecast, and are they stable? | Global SHAP, horizon and retail-segment stability, plus local signed drivers |
+| Inventory | What replenishment action follows from the forecast? | Policy KPIs and a configurable `(R,S)` simulation with suggested order quantity |
+
+### Example 1: inspect a SKU forecast
+
+![Forecast explorer example](docs/assets/dashboard-forecast-example.png)
+
+For `FOODS_3_090_TX_2`, the selected XGBoost model forecasts 1,639.6 median units over 28 days,
+with a peak daily median of 91.2 units. The green band is the q05-q95 interval used by the
+inventory simulation. A planner can change store, category, and SKU from the sidebar and inspect
+the corresponding daily values in the table below the chart.
+
+### Example 2: compare candidates at the right planning level
+
+![Dashboard model comparison](docs/assets/dashboard-model-comparison.png)
+
+The comparison view separates hierarchy-wide quality from operational aggregation. XGBoost has
+the best WRMSSE at 0.783 and a store-day WAPE of 15.2%; LightGBM is almost tied at store level but
+has a weaker WRMSSE of 0.817. The dashboard can repeat the comparison for SKU-store-day,
+SKU-store-28-day, store-category, weekly, or total demand and switch among WRMSSE, RMSSE, WAPE,
+MAE, bias, coverage, interval width, pinball loss, and fold degradation.
+
+### Example 3: turn the forecast into an order
+
+![Dashboard inventory example](docs/assets/dashboard-inventory-example.png)
+
+Under the documented default assumptions, the XGBoost policy costs 14,913 with a 96.9% fill rate,
+while seasonal naive costs 15,214 with a 97.2% fill rate. For `FOODS_3_090_TX_2`, current on-hand
+inventory and reorder point are both approximately 376 units. The order-up-to level is 800, so
+the suggested order is 424 units. In the live view, lead time, review period, service level, and
+on-hand inventory can be changed to recalculate the decision for the selected SKU.
+
+These are portfolio simulations rather than recovered Walmart operating policies. The inventory
+view uses synthetic configurable assumptions because M5 does not contain actual stock, supplier,
+lead-time, pack-size, or ordering-cost histories.
 
 MinIO uses the local development credentials from `.env`: username `minio` and password
 `minio-local-only` with the default configuration. These credentials are only intended for the
