@@ -10,8 +10,32 @@ and turns the selected forecast into inventory decisions.
 Este proyecto reproduce en local un flujo productivo de forecasting retail. Los datos M5 se
 procesan con Spark y Delta Lake en capas Bronze, Silver y Gold. Los experimentos, modelos y
 promociones se gestionan con MLflow, PostgreSQL y MinIO. El sistema compara baselines,
-LightGBM, XGBoost y N-HiTS, genera explicaciones y simula políticas de reposición con supuestos
-de inventario configurables. La misma lógica se ejecuta desde CLI y notebooks documentados.
+LightGBM y XGBoost, genera explicaciones y simula políticas de reposición con supuestos de
+inventario configurables. N-HiTS se conserva como experimento histórico, pero está desactivado
+porque fue el candidato más lento y el de peor calidad. La misma lógica se ejecuta desde CLI y
+notebooks documentados.
+
+### Cómo interpretar SKU-store-day y WAPE
+
+`SKU-store-day` significa las unidades de un producto concreto, en una tienda concreta, durante
+un día concreto. Es la granularidad necesaria para decidir la reposición de ese producto, pero
+también es la señal más ruidosa del proyecto. En el backtest, el 57,2% de esas observaciones son
+cero.
+
+WAPE divide la suma de errores absolutos entre la demanda total. Por ejemplo, para demanda
+`[0, 0, 0, 0, 0, 0, 7]` y predicción `[1, 1, 1, 1, 1, 1, 1]`, el error absoluto suma 12 y la
+demanda suma 7: WAPE es 171%. Por tanto, WAPE no está limitado al 100%. Una predicción suavizada
+se penaliza en los días sin venta y también cuando no anticipa el pico.
+
+`Store-day` agrega todos los productos de la tienda antes de calcular el error. Las
+sobrepredicciones de unos productos compensan parcialmente las infrapredicciones de otros. Por
+eso el champion obtiene 15,15% en store-day y 72,21% en SKU-store-day. El primer valor sirve para
+planificación agregada de tienda; no demuestra precisión en la reposición de cada producto.
+
+Para mejorar el nivel SKU-store-day faltarían, sobre todo, disponibilidad y roturas de stock,
+ventas perdidas, promociones y exposición, inventario y pedidos históricos, lanzamientos y bajas
+de surtido, sustitución entre productos y variables locales. M5 registra ventas, que no siempre
+son iguales a demanda: una venta cero puede significar falta de interés o falta de stock.
 
 ## Architecture
 
@@ -36,13 +60,14 @@ share the same code, configuration, volumes, and MLflow tracking endpoint.
 
 Docker uses small multi-stage targets instead of one universal image. Spark nodes contain only
 the lakehouse stack, MLflow and Streamlit have dedicated runtimes, and Jupyter extends the
-training image. The default `dev` targets use CPU PyTorch. Optional `full` targets add the CUDA
-wheel for XGBoost and N-HiTS; LightGBM uses its prebuilt CPU wheel.
+training image. The default `dev` pipeline and Jupyter targets do not install PyTorch or
+NeuralForecast. The archived N-HiTS experiment requires an explicit GPU/deep image build;
+LightGBM and XGBoost remain available in the smaller default images.
 
 ## Quick start
 
-Prerequisites are Docker Desktop, NVIDIA drivers with Docker GPU support, and the five M5 files
-in `data/`. The `full` profile requires CUDA; `dev` can fall back to CPU.
+Prerequisites are Docker Desktop and the five M5 files in `data/`. NVIDIA drivers and Docker GPU
+support are required only for explicitly built optional GPU targets.
 
 ```powershell
 Copy-Item .env.example .env
@@ -103,6 +128,7 @@ retail-forecast pipeline status --profile dev
 retail-forecast model backtest --profile dev
 retail-forecast model train --profile dev
 retail-forecast model finalize --profile dev
+retail-forecast model evaluate --profile dev [--mlflow-run-id <existing-run-id>]
 retail-forecast model promote --profile dev --run-id <mlflow-run-id>
 retail-forecast forecast run --profile dev
 retail-forecast inventory simulate --profile dev
@@ -169,6 +195,26 @@ days. XGBoost reached a 96.90% mean fill rate with 25.84 average units on hand a
 simulated cost of 14,912.75. Seasonal naive reached 97.18%, held 33.14 units on average, and cost
 15,213.73. Under the current cost assumptions, XGBoost reduces inventory and total cost with a
 small service-level tradeoff.
+
+Additional decision metrics are calculated from the same stored out-of-sample folds; no model is
+retrained to produce this table. Pinball loss evaluates the complete probabilistic forecast and
+bottom RMSSE reports the unweighted SKU-store scale-adjusted error.
+
+| Model | Bottom RMSSE | Mean pinball loss |
+| --- | ---: | ---: |
+| XGBoost | 0.733 | **0.308** |
+| LightGBM | **0.731** | 0.312 |
+| Moving average | 0.737 | 0.329 |
+| Seasonal naive | 0.963 | 0.384 |
+| N-HiTS, historical | 1.127 | 0.448 |
+
+| Inventory policy | Fill rate | Stockout rate | Average inventory | Lost sales | Total cost |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| XGBoost | 96.90% | 0.93% | **25.84** | 2,030.7 | **14,912.75** |
+| Seasonal naive | **97.18%** | **0.64%** | 33.14 | **1,523.0** | 15,213.73 |
+
+The inventory result exposes the tradeoff explicitly: XGBoost lowers inventory and total cost,
+while seasonal naive produces slightly fewer stockouts and lost sales.
 
 ## Data and generated artifacts
 

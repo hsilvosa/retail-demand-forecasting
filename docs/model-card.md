@@ -29,6 +29,11 @@ specialized candidates remained near 69%. None met a 20% bottom-level target. A 
 leakage-safe level calibration brought XGBoost bias from -5.88% to -0.82%; the resulting model
 reached WRMSSE 0.7827, passed all promotion guardrails, and became Registry version 5.
 
+The champion's mean pinball loss is 0.308 demand units and its unweighted bottom-level RMSSE is
+0.733. Its inventory policy reaches 96.90% mean fill rate, 0.93% stockout rate, 25.84 average
+units on hand, 2,030.7 lost-sale units, and 14,912.75 total simulated cost. These figures are
+reported together because improving cost can trade away service.
+
 ## Limitations
 
 M5 covers ten stores in three US states and does not represent every retail format. Historical

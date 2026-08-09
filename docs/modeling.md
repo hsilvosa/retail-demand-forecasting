@@ -16,9 +16,12 @@ target-aligned lag is at least as long as the 28-day horizon, so it is observed 
 
 Seasonal naive and a 28-day moving average establish transparent controls. LightGBM and XGBoost
 use Tweedie regression. LightGBM uses native categorical splits after stable ordinal encoding and
-stays on its portable CPU wheel. XGBoost and N-HiTS run on CPU
-in the development image and use CUDA in the optional `full` image. N-HiTS uses 168 days of
-context, robust scaling, known future variables, and quantile loss for `q05`, `q50`, and `q95`.
+stays on its portable CPU wheel. XGBoost runs on CPU in the development image and can use CUDA in
+the optional `full` image.
+
+N-HiTS remains implemented for historical comparison but is disabled in the default model list.
+Its completed development benchmark produced WRMSSE 2.3129, WAPE 113.21%, and mean pinball loss
+0.448 while dominating runtime. It must be re-enabled explicitly in its notebook to train again.
 
 The boosting search uses a deterministic ten percent sample. Hyperparameters are selected on a
 temporal validation origin and the candidate is refitted on the complete profile. N-HiTS uses a
@@ -47,6 +50,13 @@ WAPE is also reported at SKU-store-day, 28-day SKU-store, store-day, store-categ
 total-day, weekly SKU-store, and weekly store-category levels. Aggregation happens before metric
 calculation within each fold. The default operational dashboard level is store-day, while the
 bottom-level result always remains visible.
+
+Mean pinball loss averages losses at q05, q50, and q95 and evaluates both interval placement and
+the median forecast. Bottom RMSSE is the unweighted mean SKU-store RMSSE from hierarchy level 12;
+WRMSSE remains the primary hierarchy-aware score because it includes all levels and revenue
+weights. Inventory evaluation separately reports fill rate, stockout rate, average inventory,
+lost sales, and total cost. These measures expose service and cost tradeoffs that point accuracy
+alone cannot represent.
 
 ## Improvement study
 
