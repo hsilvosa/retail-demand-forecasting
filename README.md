@@ -253,18 +253,30 @@ model's behavior, not a causal effect on demand.
 | 4 | `rolling_std_56` | 0.083 | 4.83% | -0.043 | 43.85% |
 | 5 | `rolling_mean_7` | 0.077 | 4.48% | -0.026 | 28.40% |
 
+#### Direction of the effect
+
+![XGBoost SHAP direction and distribution](docs/assets/xgboost-shap-beeswarm.png)
+
+The beeswarm adds information that a ranking cannot show. Each point is one explained
+SKU-horizon prediction, horizontal position is the signed change from the model baseline, and
+color represents the feature value from low to high. `rolling_mean_56` lowers the prediction in
+83.70% of sampled rows, while its high-value tail can add more than two units. This is consistent
+with a dataset dominated by intermittent low-demand rows and a smaller high-demand tail.
+
+`origin_day` has only 2.74% importance but is positive in 99.85% of rows, which is a drift
+warning: later forecast origins systematically receive an uplift and need monitoring in
+production. Encoded categorical colors, such as `target_wday`, must be read as category-specific
+effects rather than as a continuous causal relationship.
+
+#### Stability across horizons and retail segments
+
+![SHAP horizon and retail-segment diagnostics](docs/assets/dashboard-shap-diagnostics.png)
+
 Demand-history features contribute 82.17% of total mean absolute attribution, calendar and
 horizon variables 11.91%, identifiers 3.16%, and price variables 2.76%. The five leading
 features concentrate 66.76% of all attribution. `rolling_mean_56` ranks first at every horizon,
 so the model's central behavior is stable across the 28-day forecast window rather than switching
 to identifiers or calendar shortcuts as the horizon grows.
-
-The beeswarm gives the important directional nuance. `rolling_mean_56` lowers the prediction
-relative to baseline in 83.70% of sampled rows, while its high-demand tail can add more than two
-units. This is consistent with a dataset dominated by intermittent low-demand rows and a smaller
-high-demand tail. `origin_day` has only 2.74% importance but is positive in 99.85% of rows, which
-is a drift warning: later origins systematically receive an uplift and need monitoring in
-production.
 
 Low identifier importance suggests that the global model is not primarily memorizing SKU and
 store codes. Low price importance is less reassuring because M5 lacks the promotion, display,
@@ -277,6 +289,17 @@ Attribution magnitude is highest for HOBBIES at 2.000 mean total absolute SHAP, 
 1.848 for HOUSEHOLD and 1.505 for FOODS. WI_2 is the highest-magnitude store at 1.899, while CA_1
 is the lowest at 1.589. This does not rank forecast error; it shows where the model makes the
 largest adjustments away from its baseline and where local explanations deserve closer review.
+
+#### Local prediction example
+
+![Local signed SHAP example](docs/assets/dashboard-shap-local-example.png)
+
+For `FOODS_3_090_TX_2` at horizon 13, the 56-day rolling mean adds 2.141 units relative to the
+baseline, followed by the 7-day mean at +0.745 and the 28-day mean at +0.464. The annual target
+lag offsets the forecast by 0.085 units. This makes the local decision traceable: the uplift is
+mainly a response to a persistently high recent demand level, not an identifier or price effect.
+The dashboard lists the ten sampled SKU-horizon rows with the largest total absolute attribution
+so that unusually strong adjustments can be reviewed directly.
 
 The editable [SHAP notebook](notebooks/08_explainability.ipynb) contains the global and grouped
 tables, importance stability across all horizons, ten high-attribution local SKU-store examples,
