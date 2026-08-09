@@ -16,7 +16,11 @@ from retail_forecasting.explainability import explain_nhits, explain_tree
 from retail_forecasting.forecasting.baselines import MovingAverage, SeasonalNaive
 from retail_forecasting.forecasting.calibration import ResidualCalibrator
 from retail_forecasting.forecasting.deep import NHITSForecaster
-from retail_forecasting.forecasting.metrics import hierarchical_wrmsse_spark, point_metrics
+from retail_forecasting.forecasting.metrics import (
+    hierarchical_wrmsse_spark,
+    point_metrics,
+    summarize_backtest_points,
+)
 from retail_forecasting.forecasting.models import (
     DirectTreeForecaster,
     ModelKind,
@@ -46,6 +50,17 @@ BACKTEST_COLUMNS = [
     "q95",
     "unit_price",
 ]
+
+
+def _model_label(name: str) -> str:
+    labels = {
+        "lightgbm": "LightGBM",
+        "xgboost": "XGBoost",
+        "nhits": "N-HiTS",
+        "moving_average": "Moving Average",
+        "seasonal_naive": "Seasonal Naive",
+    }
+    return labels.get(name, name.replace("_", " ").title())
 
 
 def _cuda_available() -> bool:
@@ -365,13 +380,16 @@ def run_forecasting(config: ProjectConfig, run_id: str) -> dict[str, Any]:
     fold_metrics: dict[str, list[dict[str, float]]] = defaultdict(list)
     all_predictions: list[pd.DataFrame] = []
     parent_run_id = ""
-    with tracking_run(config, run_id) as parent_run:
+    parent_name = f"Official Backtest | {config.profile.upper()} | {run_id}"
+    with tracking_run(config, parent_name) as parent_run:
+        mlflow.set_tags({"workflow": "temporal_backtest", "result_role": "official"})
         parent_run_id = parent_run.info.run_id
         mlflow.log_dict(tuned, "tuning/best_parameters.json")
         for origin in config.data.backtest_origins:
             train, evaluation = _split_fold(features, origin)
             for name in config.models.names:
-                with mlflow.start_run(run_name=f"{name}-d_{origin}", nested=True):
+                child_name = f"Fold d_{origin} | {_model_label(name)}"
+                with mlflow.start_run(run_name=child_name, nested=True):
                     if name in {"seasonal_naive", "moving_average"}:
                         _, predicted = _baseline_predictions(name, train, evaluation)
                         evaluated_rows = evaluation
@@ -403,8 +421,14 @@ def run_forecasting(config: ProjectConfig, run_id: str) -> dict[str, Any]:
             wrmsse_values = np.asarray([row["wrmsse"] for row in rows])
             summaries[name] = {
                 "mean_wrmsse": float(wrmsse_values.mean()),
+                "mae": float(np.mean([row["mae"] for row in rows])),
+                "rmse": float(np.mean([row["rmse"] for row in rows])),
+                "wape": float(np.mean([row["wape"] for row in rows])),
                 "bias": float(np.mean([row["bias"] for row in rows])),
                 "coverage": float(np.mean([row["coverage"] for row in rows])),
+                "mean_interval_width": float(
+                    np.mean([row["mean_interval_width"] for row in rows])
+                ),
                 "max_fold_degradation": 0.0,
             }
         baseline_folds = np.asarray(
@@ -523,17 +547,32 @@ def finalize_from_backtests(config: ProjectConfig, run_id: str) -> dict[str, Any
     metric_rows = spark.read.format("delta").load(
         str(table_path(config, "gold", "model_metrics"))
     ).toPandas()
+    point_columns = {"mae", "rmse", "wape", "mean_interval_width"}
+    if not point_columns.issubset(metric_rows.columns):
+        stored_backtests = spark.read.format("delta").load(
+            str(table_path(config, "gold", "backtest_forecasts"))
+        ).toPandas()
+        point_summary = summarize_backtest_points(stored_backtests)
+        metric_rows = metric_rows.drop(
+            columns=["bias", "coverage", *point_columns], errors="ignore"
+        ).merge(point_summary, on="model_name", how="left")
     summaries = {
         str(row["model_name"]): {
             "mean_wrmsse": float(row["mean_wrmsse"]),
+            "mae": float(row["mae"]),
+            "rmse": float(row["rmse"]),
+            "wape": float(row["wape"]),
             "bias": float(row["bias"]),
             "coverage": float(row["coverage"]),
+            "mean_interval_width": float(row["mean_interval_width"]),
             "max_fold_degradation": float(row["max_fold_degradation"]),
         }
         for _, row in metric_rows.iterrows()
     }
     winner = _select_winner(config, summaries)
-    with tracking_run(config, run_id) as parent_run:
+    parent_name = f"Champion Selection | {config.profile.upper()} | {run_id}"
+    with tracking_run(config, parent_name) as parent_run:
+        mlflow.set_tags({"workflow": "champion_selection", "result_role": "official"})
         log_metrics(summaries[winner])
         mlflow.log_dict(summaries, "evaluation/model_summary.json")
         final_model, final_predicted, model_input = _fit_final(
@@ -581,7 +620,10 @@ def run_single_model(
     )
     daily = spark.read.format("delta").load(str(table_path(config, "silver", "sales_daily")))
     train, evaluation = _split_fold(features, fold_origin)
-    with tracking_run(config, run_id):
+    run_name = (
+        f"Single Model | {_model_label(model_name)} | d_{fold_origin} | {run_id}"
+    )
+    with tracking_run(config, run_name):
         if model_name in {"seasonal_naive", "moving_average"}:
             _, predicted = _baseline_predictions(model_name, train, evaluation)
             evaluated_rows = evaluation

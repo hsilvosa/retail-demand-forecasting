@@ -1,7 +1,12 @@
 import numpy as np
 import pandas as pd
 
-from retail_forecasting.forecasting.metrics import hierarchical_wrmsse, point_metrics, rmsse
+from retail_forecasting.forecasting.metrics import (
+    hierarchical_wrmsse,
+    point_metrics,
+    rmsse,
+    summarize_backtest_points,
+)
 
 
 def test_point_metrics_are_zero_for_perfect_forecast() -> None:
@@ -44,3 +49,32 @@ def test_hierarchical_wrmsse_is_zero_for_perfect_bottom_up_forecast() -> None:
 
 def test_point_metric_bias_preserves_direction() -> None:
     assert np.isclose(point_metrics([1, 1], [2, 2])["bias"], 1.0)
+
+
+def test_backtest_point_metrics_are_averaged_across_folds() -> None:
+    backtests = pd.DataFrame(
+        {
+            "model_name": ["model_a"] * 4,
+            "fold_origin": [1, 1, 2, 2],
+            "target": [1.0, 3.0, 2.0, 4.0],
+            "yhat": [2.0, 2.0, 2.0, 4.0],
+            "q05": [0.0, 1.0, 1.0, 3.0],
+            "q95": [3.0, 4.0, 3.0, 5.0],
+        }
+    )
+
+    summary = summarize_backtest_points(backtests).iloc[0]
+
+    assert np.isclose(summary["mae"], 0.5)
+    assert np.isclose(summary["wape"], 0.25)
+    assert np.isclose(summary["bias"], 0.0)
+    assert np.isclose(summary["coverage"], 1.0)
+
+
+def test_empty_backtests_return_an_empty_metric_contract() -> None:
+    columns = ["model_name", "fold_origin", "target", "yhat", "q05", "q95"]
+
+    summary = summarize_backtest_points(pd.DataFrame(columns=columns))
+
+    assert summary.empty
+    assert "wape" in summary.columns

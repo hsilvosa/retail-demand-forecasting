@@ -70,6 +70,14 @@ Open the local services after the health checks pass:
 | Spark master | `http://localhost:8080` |
 | MinIO console | `http://localhost:9001` |
 
+MinIO uses the local development credentials from `.env`: username `minio` and password
+`minio-local-only` with the default configuration. These credentials are only intended for the
+local portfolio environment.
+
+In MLflow, open the `M5 Retail Forecasting - DEV` experiment. The authoritative results are the
+runs prefixed with `OFFICIAL` and `CHAMPION`; incomplete and earlier retry runs are explicitly
+labelled `FAILED` or `SUPERSEDED`.
+
 The pipeline is restartable. A completed stage is skipped when its configuration fingerprint has
 not changed. Use `--force` only when a deliberate rebuild is required.
 
@@ -112,11 +120,18 @@ The model notebooks launch real MLflow experiments. The backtesting notebook run
 selection policy and the final forecast notebook materializes the registered result. Business
 logic is not duplicated in cells.
 
+Source notebooks default to analysis-only mode through `execute_stage = False`, so opening and
+running an EDA notebook reuses existing Delta tables. The `notebooks run` CLI overrides this to
+`True` for a reproducible end-to-end notebook execution. Bronze, Silver, Gold, and backtesting
+include source audits, transformation contracts, feature definitions, normalization decisions,
+leakage checks, demand-regime analysis, and explicit limitations.
+
 ## Evaluation and promotion
 
 Backtests use origins `d_1857`, `d_1885`, and `d_1913`, each with a 28-day horizon. WRMSSE is
-calculated over the 12 official M5 levels using bottom-up coherent forecasts. MAE, WAPE, bias,
-RMSSE, and 90 percent interval coverage provide diagnostic context.
+calculated over the 12 official M5 levels using bottom-up coherent forecasts. MAE, RMSE, WAPE,
+bias, 90 percent interval coverage, interval width, and fold degradation provide diagnostic
+context.
 
 The Registry alias `champion` is updated only when the candidate improves WRMSSE by at least one
 percent and satisfies the configured bias, coverage, and fold guardrails. The forecast job writes
@@ -129,19 +144,24 @@ series. They describe the reproducible `dev` profile and are not presented as fu
 benchmark scores. The backtest MLflow run is `848ba80d58624ee2b3e278fdbf8857b2`; the eligible
 finalization run is `1b0d3522c9c142239972de22405108bd`.
 
-| Model | Mean WRMSSE | Bias | 90% coverage | Maximum fold degradation |
-| --- | ---: | ---: | ---: | ---: |
-| LightGBM | **0.8544** | -8.34% | 90.98% | 0.00% |
-| Moving average | 1.0309 | **-1.87%** | 88.90% | 0.00% |
-| Seasonal naive | 1.2395 | -5.93% | 91.89% | 0.00% |
-| XGBoost | 1.3000 | -25.72% | 90.74% | 9.11% |
-| N-HiTS | 1.9210 | 25.13% | 86.00% | 116.15% |
+| Model | WRMSSE | WAPE | MAE | RMSE | Bias | 90% coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| LightGBM | **0.8544** | **72.30%** | **1.051** | **2.456** | -8.34% | 90.98% |
+| Moving average | 1.0309 | 73.46% | 1.068 | 2.465 | **-1.87%** | 88.90% |
+| Seasonal naive | 1.2395 | 86.72% | 1.261 | 3.002 | -5.93% | 91.89% |
+| XGBoost | 1.3000 | 73.66% | 1.071 | 2.864 | -25.72% | 90.74% |
+| N-HiTS | 1.9210 | 107.34% | 1.563 | 6.721 | 25.13% | 86.00% |
 
 LightGBM achieved the best WRMSSE but failed the configured absolute-bias guardrail of 5%.
 Moving average was therefore registered as `retail-demand-forecaster` version 3 and promoted to
 the `champion` alias. LightGBM remains an accuracy candidate with global and local SHAP artifacts
 for diagnosis. The champion produced 25,200 bottom-level forecasts for `d_1942` through `d_1969`,
 representing 37,700 forecast units.
+
+The champion's 73.46% bottom-level WAPE is not production-quality. In the stored evaluation,
+57.2% of SKU-days have zero demand, but intermittency does not fully explain the weakness: WAPE
+is still 60.8% for the densest series. The current alias therefore identifies the best candidate
+under the configured promotion rules, not a model ready for operational deployment.
 
 The inventory simulation compared the champion with seasonal naive across 900 series and 28
 days. Moving average reached a 96.92% mean fill rate with 28.82 average units on hand and a total

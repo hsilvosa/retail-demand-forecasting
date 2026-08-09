@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
-from retail_forecasting.data.gold import HIERARCHY_LEVELS
-
 if TYPE_CHECKING:
     from pyspark.sql import DataFrame
 
@@ -37,6 +35,28 @@ def point_metrics(
     return result
 
 
+def summarize_backtest_points(backtests: pd.DataFrame) -> pd.DataFrame:
+    """Average point and interval metrics across temporal folds for each model."""
+    required = {"model_name", "fold_origin", "target", "yhat", "q05", "q95"}
+    metric_names = ["mae", "rmse", "wape", "bias", "coverage", "mean_interval_width"]
+    missing = required.difference(backtests.columns)
+    if missing:
+        raise ValueError(f"backtests are missing columns: {sorted(missing)}")
+    if backtests.empty:
+        return pd.DataFrame(columns=["model_name", *metric_names])
+    rows: list[dict[str, float | str]] = []
+    for (model_name, _), fold in backtests.groupby(
+        ["model_name", "fold_origin"], sort=False
+    ):
+        rows.append(
+            {
+                "model_name": str(model_name),
+                **point_metrics(fold["target"], fold["yhat"], fold["q05"], fold["q95"]),
+            }
+        )
+    return pd.DataFrame(rows).groupby("model_name", as_index=False)[metric_names].mean()
+
+
 def rmsse(actual: Any, predicted: Any, history: Any) -> float:
     y = np.asarray(actual, dtype=float)
     yhat = np.asarray(predicted, dtype=float)
@@ -63,6 +83,8 @@ def hierarchical_wrmsse(
     revenue_window: int = 28,
 ) -> tuple[float, pd.DataFrame]:
     """Compute the official bottom-up weighted RMSSE across all 12 M5 levels."""
+    from retail_forecasting.data.gold import HIERARCHY_LEVELS
+
     required_history = {"day_num", "units", "sell_price", *sum(HIERARCHY_LEVELS, ())}
     required_forecast = {"day_num", "target", "yhat", *sum(HIERARCHY_LEVELS, ())}
     if not required_history.issubset(history.columns) or not required_forecast.issubset(
@@ -116,6 +138,8 @@ def hierarchical_wrmsse_spark(
 
     from pyspark.sql import Window
     from pyspark.sql import functions as F
+
+    from retail_forecasting.data.gold import HIERARCHY_LEVELS
 
     history_frame = history.filter(F.col("day_num") <= origin_day).cache()
     results = []

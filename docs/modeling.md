@@ -27,6 +27,14 @@ The three folds advance by 28 days and never mix future observations into traini
 the revenue weights and scale denominators available at each origin. Metrics are persisted by
 fold, hierarchy level, horizon, and model.
 
+WRMSSE remains the primary M5 metric because it evaluates all hierarchy levels and weights them by
+recent revenue. WAPE reports total absolute error relative to total demand and remains defined for
+zero-demand rows. MAE and RMSE express point error in units, with RMSE assigning more weight to
+large misses. Signed bias exposes systematic under- or over-forecasting. Coverage measures the
+share of observations inside `q05` to `q95`, while mean interval width indicates how much
+uncertainty was required to obtain that coverage. Maximum fold degradation captures temporal
+instability relative to seasonal naive.
+
 ## Explainability
 
 TreeExplainer produces SHAP global and local attributions for both tree candidates. N-HiTS uses

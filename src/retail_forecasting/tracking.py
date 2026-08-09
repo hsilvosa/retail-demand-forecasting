@@ -25,7 +25,9 @@ def tracking_run(config: ProjectConfig, run_name: str) -> Iterator[Any]:
     import mlflow
 
     mlflow.set_tracking_uri(config.mlflow.tracking_uri)
-    mlflow.set_experiment(f"{config.mlflow.experiment_prefix}-{config.profile}")
+    mlflow.set_experiment(
+        f"{config.mlflow.experiment_prefix} - {config.profile.upper()}"
+    )
     with mlflow.start_run(run_name=run_name) as run:
         mlflow.set_tags(
             {

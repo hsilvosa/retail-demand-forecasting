@@ -16,6 +16,11 @@ The model version carrying the `champion` alias passed the configured WRMSSE imp
 coverage, and fold guardrails at promotion time. Exact results belong to that MLflow version and
 must not be copied from a different run.
 
+The reproduced development champion has 73.46% bottom-level WAPE and must be treated as a
+benchmark requiring improvement, not as a production-ready forecaster. More than half of evaluated
+SKU-days have zero demand, while dense-series WAPE remains 60.8%; the error is therefore not
+attributable to intermittency alone.
+
 ## Limitations
 
 M5 covers ten stores in three US states and does not represent every retail format. Historical
