@@ -123,8 +123,9 @@ logic is not duplicated in cells.
 ## Evaluation and promotion
 
 Backtests use origins `d_1857`, `d_1885`, and `d_1913`, each with a 28-day horizon. WRMSSE is
-calculated over the 12 official M5 levels using bottom-up coherent forecasts. MAE, WAPE, bias,
-RMSSE, and 90 percent interval coverage provide diagnostic context.
+calculated over the 12 official M5 levels using bottom-up coherent forecasts. MAE, RMSE, WAPE,
+bias, 90 percent interval coverage, interval width, and fold degradation provide diagnostic
+context.
 
 The Registry alias `champion` is updated only when the candidate improves WRMSSE by at least one
 percent and satisfies the configured bias, coverage, and fold guardrails. The forecast job writes
@@ -137,13 +138,13 @@ series. They describe the reproducible `dev` profile and are not presented as fu
 benchmark scores. The backtest MLflow run is `848ba80d58624ee2b3e278fdbf8857b2`; the eligible
 finalization run is `1b0d3522c9c142239972de22405108bd`.
 
-| Model | Mean WRMSSE | Bias | 90% coverage | Maximum fold degradation |
-| --- | ---: | ---: | ---: | ---: |
-| LightGBM | **0.8544** | -8.34% | 90.98% | 0.00% |
-| Moving average | 1.0309 | **-1.87%** | 88.90% | 0.00% |
-| Seasonal naive | 1.2395 | -5.93% | 91.89% | 0.00% |
-| XGBoost | 1.3000 | -25.72% | 90.74% | 9.11% |
-| N-HiTS | 1.9210 | 25.13% | 86.00% | 116.15% |
+| Model | WRMSSE | WAPE | MAE | RMSE | Bias | 90% coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| LightGBM | **0.8544** | **72.30%** | **1.051** | **2.456** | -8.34% | 90.98% |
+| Moving average | 1.0309 | 73.46% | 1.068 | 2.465 | **-1.87%** | 88.90% |
+| Seasonal naive | 1.2395 | 86.72% | 1.261 | 3.002 | -5.93% | 91.89% |
+| XGBoost | 1.3000 | 73.66% | 1.071 | 2.864 | -25.72% | 90.74% |
+| N-HiTS | 1.9210 | 107.34% | 1.563 | 6.721 | 25.13% | 86.00% |
 
 LightGBM achieved the best WRMSSE but failed the configured absolute-bias guardrail of 5%.
 Moving average was therefore registered as `retail-demand-forecaster` version 3 and promoted to

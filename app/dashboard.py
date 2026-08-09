@@ -13,6 +13,7 @@ import streamlit as st
 from deltalake import DeltaTable
 
 from retail_forecasting.config import load_config
+from retail_forecasting.forecasting.metrics import summarize_backtest_points
 from retail_forecasting.inventory import InventoryPolicy, simulate_series
 
 st.set_page_config(page_title="Retail Demand Control", layout="wide")
@@ -71,6 +72,13 @@ backtests = read_delta("backtest_forecasts")
 inventory_kpis = read_delta("inventory_kpis")
 recommendations = read_delta("inventory_recommendations")
 
+if not metrics.empty and not backtests.empty:
+    point_summary = summarize_backtest_points(backtests)
+    point_columns = [column for column in point_summary.columns if column != "model_name"]
+    metrics = metrics.drop(columns=point_columns, errors="ignore").merge(
+        point_summary, on="model_name", how="left"
+    )
+
 st.title("Retail Demand Control")
 if forecasts.empty:
     st.error("Forecast data is not available.")
@@ -93,16 +101,15 @@ series_forecast = category_forecasts.loc[
 
 model_name = str(forecasts["model_name"].iloc[0])
 run_id = str(forecasts["run_id"].iloc[0])
-coverage = (
-    float(metrics.loc[metrics["model_name"] == model_name, "coverage"].iloc[0])
-    if not metrics.empty
-    else 0
-)
-wrmsse = (
-    float(metrics.loc[metrics["model_name"] == model_name, "mean_wrmsse"].iloc[0])
-    if not metrics.empty
-    else 0
-)
+champion_metrics = metrics.loc[metrics["model_name"] == model_name]
+
+
+def champion_metric(column: str) -> float:
+    if champion_metrics.empty or column not in champion_metrics:
+        return 0.0
+    return float(champion_metrics[column].iloc[0])
+
+
 recommended = recommendations.loc[recommendations["series_id"] == selected_series]
 
 overview, explorer, comparison, explanation, inventory = st.tabs(
@@ -112,9 +119,14 @@ overview, explorer, comparison, explanation, inventory = st.tabs(
 with overview:
     columns = st.columns(4)
     columns[0].metric("Champion", model_name)
-    columns[1].metric("Mean WRMSSE", f"{wrmsse:.4f}")
-    columns[2].metric("90% coverage", f"{coverage:.1%}")
+    columns[1].metric("Mean WRMSSE", f"{champion_metric('mean_wrmsse'):.4f}")
+    columns[2].metric("90% coverage", f"{champion_metric('coverage'):.1%}")
     columns[3].metric("Forecast demand", f"{series_forecast['q50'].sum():,.1f}")
+    columns = st.columns(4)
+    columns[0].metric("WAPE", f"{champion_metric('wape'):.1%}")
+    columns[1].metric("MAE", f"{champion_metric('mae'):.3f}")
+    columns[2].metric("RMSE", f"{champion_metric('rmse'):.3f}")
+    columns[3].metric("Bias", f"{champion_metric('bias'):.1%}")
     st.subheader("Demand outlook")
     summary = (
         store_forecasts.groupby(["target_date", "cat_id"], as_index=False)["q50"].sum()
@@ -173,17 +185,76 @@ with comparison:
     if metrics.empty:
         st.warning("Model metrics are not available.")
     else:
-        figure = px.bar(
-            metrics.sort_values("mean_wrmsse"),
-            x="model_name",
-            y="mean_wrmsse",
-            color="model_name",
-            color_discrete_sequence=["#20744a", "#d4932f", "#496d8c", "#a94b45", "#6b665f"],
-            labels={"model_name": "Model", "mean_wrmsse": "Mean WRMSSE"},
+        metric_options = {
+            "WRMSSE": "mean_wrmsse",
+            "WAPE": "wape",
+            "MAE": "mae",
+            "RMSE": "rmse",
+            "Bias": "bias",
+            "90% coverage": "coverage",
+            "Interval width": "mean_interval_width",
+            "Fold degradation": "max_fold_degradation",
+        }
+        selected_metric = st.selectbox("Metric", metric_options)
+        metric_column = metric_options[selected_metric]
+        chart_data = metrics.copy()
+        chart_data["Model"] = chart_data["model_name"].replace(
+            {
+                "lightgbm": "LightGBM",
+                "xgboost": "XGBoost",
+                "nhits": "N-HiTS",
+                "moving_average": "Moving Average",
+                "seasonal_naive": "Seasonal Naive",
+            }
         )
+        figure = px.bar(
+            chart_data.sort_values(metric_column),
+            x="Model",
+            y=metric_column,
+            color="Model",
+            color_discrete_sequence=["#20744a", "#d4932f", "#496d8c", "#a94b45", "#6b665f"],
+            labels={metric_column: selected_metric},
+        )
+        if metric_column in {"wape", "bias", "coverage", "max_fold_degradation"}:
+            figure.update_yaxes(tickformat=".1%")
+        if metric_column == "bias":
+            figure.add_hline(y=0, line_color="#6b665f", line_dash="dot")
+        if metric_column == "coverage":
+            figure.add_hline(y=0.9, line_color="#6b665f", line_dash="dot")
         figure.update_layout(showlegend=False, margin=dict(l=0, r=0, t=16, b=0))
         st.plotly_chart(figure, width="stretch")
-        st.dataframe(metrics, width="stretch", hide_index=True)
+        comparison_table = chart_data[
+            [
+                "Model",
+                "mean_wrmsse",
+                "wape",
+                "mae",
+                "rmse",
+                "bias",
+                "coverage",
+                "mean_interval_width",
+                "max_fold_degradation",
+            ]
+        ].sort_values("mean_wrmsse")
+        st.dataframe(
+            comparison_table,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "mean_wrmsse": st.column_config.NumberColumn("WRMSSE", format="%.4f"),
+                "wape": st.column_config.NumberColumn("WAPE", format="percent"),
+                "mae": st.column_config.NumberColumn("MAE", format="%.3f"),
+                "rmse": st.column_config.NumberColumn("RMSE", format="%.3f"),
+                "bias": st.column_config.NumberColumn("Bias", format="percent"),
+                "coverage": st.column_config.NumberColumn("Coverage", format="percent"),
+                "mean_interval_width": st.column_config.NumberColumn(
+                    "Interval width", format="%.3f"
+                ),
+                "max_fold_degradation": st.column_config.NumberColumn(
+                    "Fold degradation", format="percent"
+                ),
+            },
+        )
     mlflow_location = champion_mlflow_location()
     if mlflow_location:
         experiment_id, mlflow_run_id = mlflow_location

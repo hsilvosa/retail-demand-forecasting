@@ -16,7 +16,11 @@ from retail_forecasting.explainability import explain_nhits, explain_tree
 from retail_forecasting.forecasting.baselines import MovingAverage, SeasonalNaive
 from retail_forecasting.forecasting.calibration import ResidualCalibrator
 from retail_forecasting.forecasting.deep import NHITSForecaster
-from retail_forecasting.forecasting.metrics import hierarchical_wrmsse_spark, point_metrics
+from retail_forecasting.forecasting.metrics import (
+    hierarchical_wrmsse_spark,
+    point_metrics,
+    summarize_backtest_points,
+)
 from retail_forecasting.forecasting.models import (
     DirectTreeForecaster,
     ModelKind,
@@ -417,8 +421,14 @@ def run_forecasting(config: ProjectConfig, run_id: str) -> dict[str, Any]:
             wrmsse_values = np.asarray([row["wrmsse"] for row in rows])
             summaries[name] = {
                 "mean_wrmsse": float(wrmsse_values.mean()),
+                "mae": float(np.mean([row["mae"] for row in rows])),
+                "rmse": float(np.mean([row["rmse"] for row in rows])),
+                "wape": float(np.mean([row["wape"] for row in rows])),
                 "bias": float(np.mean([row["bias"] for row in rows])),
                 "coverage": float(np.mean([row["coverage"] for row in rows])),
+                "mean_interval_width": float(
+                    np.mean([row["mean_interval_width"] for row in rows])
+                ),
                 "max_fold_degradation": 0.0,
             }
         baseline_folds = np.asarray(
@@ -537,11 +547,24 @@ def finalize_from_backtests(config: ProjectConfig, run_id: str) -> dict[str, Any
     metric_rows = spark.read.format("delta").load(
         str(table_path(config, "gold", "model_metrics"))
     ).toPandas()
+    point_columns = {"mae", "rmse", "wape", "mean_interval_width"}
+    if not point_columns.issubset(metric_rows.columns):
+        stored_backtests = spark.read.format("delta").load(
+            str(table_path(config, "gold", "backtest_forecasts"))
+        ).toPandas()
+        point_summary = summarize_backtest_points(stored_backtests)
+        metric_rows = metric_rows.drop(
+            columns=["bias", "coverage", *point_columns], errors="ignore"
+        ).merge(point_summary, on="model_name", how="left")
     summaries = {
         str(row["model_name"]): {
             "mean_wrmsse": float(row["mean_wrmsse"]),
+            "mae": float(row["mae"]),
+            "rmse": float(row["rmse"]),
+            "wape": float(row["wape"]),
             "bias": float(row["bias"]),
             "coverage": float(row["coverage"]),
+            "mean_interval_width": float(row["mean_interval_width"]),
             "max_fold_degradation": float(row["max_fold_degradation"]),
         }
         for _, row in metric_rows.iterrows()
