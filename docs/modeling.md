@@ -16,9 +16,12 @@ target-aligned lag is at least as long as the 28-day horizon, so it is observed 
 
 Seasonal naive and a 28-day moving average establish transparent controls. LightGBM and XGBoost
 use Tweedie regression. LightGBM uses native categorical splits after stable ordinal encoding and
-stays on its portable CPU wheel. XGBoost and N-HiTS run on CPU
-in the development image and use CUDA in the optional `full` image. N-HiTS uses 168 days of
-context, robust scaling, known future variables, and quantile loss for `q05`, `q50`, and `q95`.
+stays on its portable CPU wheel. XGBoost runs on CPU in the development image and can use CUDA in
+the optional `full` image.
+
+N-HiTS remains implemented for historical comparison but is disabled in the default model list.
+Its completed development benchmark produced WRMSSE 2.3129, WAPE 113.21%, and mean pinball loss
+0.448 while dominating runtime. It must be re-enabled explicitly in its notebook to train again.
 
 The boosting search uses a deterministic ten percent sample. Hyperparameters are selected on a
 temporal validation origin and the candidate is refitted on the complete profile. N-HiTS uses a
@@ -48,6 +51,13 @@ total-day, weekly SKU-store, and weekly store-category levels. Aggregation happe
 calculation within each fold. The default operational dashboard level is store-day, while the
 bottom-level result always remains visible.
 
+Mean pinball loss averages losses at q05, q50, and q95 and evaluates both interval placement and
+the median forecast. Bottom RMSSE is the unweighted mean SKU-store RMSSE from hierarchy level 12;
+WRMSSE remains the primary hierarchy-aware score because it includes all levels and revenue
+weights. Inventory evaluation separately reports fill rate, stockout rate, average inventory,
+lost sales, and total cost. These measures expose service and cost tradeoffs that point accuracy
+alone cannot represent.
+
 ## Improvement study
 
 The focused improvement runner in `scripts/benchmark_tree_objectives.py` holds out `d_1913` and
@@ -61,10 +71,26 @@ bias and improved hierarchy-weighted accuracy.
 
 ## Explainability
 
-TreeExplainer produces SHAP global and local attributions for both tree candidates. N-HiTS uses
-Integrated Gradients through NeuralForecast. Attribution values from different explanation
-methods are not compared numerically.
+TreeExplainer produces SHAP attributions for both tree candidates. The stored analysis ranks
+features by mean absolute SHAP, retains signed contributions, aggregates related features into
+demand-history, calendar, identifier, and price families, and recalculates importance for every
+forecast horizon. Local review selects the sampled SKU-horizon rows with the largest total
+absolute attribution and reports their three strongest signed drivers.
 
-Review focuses on stability across horizon, state, category, and demand intermittency. Unexpected
-dependence on identifiers, missing-price flags, or a single event family is treated as a model
-risk even when aggregate accuracy improves.
+The XGBoost champion analysis uses 2,000 sampled predictions, 815 SKU-store series, 52 features,
+and all 28 horizons. Demand history represents 82.17% of attribution and the top five features
+represent 66.76%. `rolling_mean_56` contributes 36.85% alone and remains the highest-importance
+feature at every horizon. Identifiers contribute only 3.16%, reducing the risk that the global
+model primarily memorizes product or store encodings. Price contributes 2.76%, which is a data
+limitation rather than evidence that demand is insensitive to price.
+
+SHAP values are associative model diagnostics, not causal effects. The positive direction of
+`origin_day` in 99.85% of sampled rows is monitored as a temporal-drift warning. Unexpected
+dependence on identifiers, missing-price flags, unavailable future fields, or a single event
+family remains a review failure even when aggregate accuracy improves.
+
+The persisted explanation contract now includes transformed `feature_*` values, `base_value`,
+and `model_output` alongside `shap_*` values. This supports dependence and waterfall plots in
+future runs. The already-completed champion artifact predates those additions, so its local table
+reports signed drivers but cannot reconstruct an exact waterfall without recomputing SHAP. Such
+recomputation does not require model training.

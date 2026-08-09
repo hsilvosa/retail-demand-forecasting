@@ -29,6 +29,11 @@ specialized candidates remained near 69%. None met a 20% bottom-level target. A 
 leakage-safe level calibration brought XGBoost bias from -5.88% to -0.82%; the resulting model
 reached WRMSSE 0.7827, passed all promotion guardrails, and became Registry version 5.
 
+The champion's mean pinball loss is 0.308 demand units and its unweighted bottom-level RMSSE is
+0.733. Its inventory policy reaches 96.90% mean fill rate, 0.93% stockout rate, 25.84 average
+units on hand, 2,030.7 lost-sale units, and 14,912.75 total simulated cost. These figures are
+reported together because improving cost can trade away service.
+
 ## Limitations
 
 M5 covers ten stores in three US states and does not represent every retail format. Historical
@@ -41,9 +46,15 @@ model execution. Predictions outside the M5 calendar require a separate future-c
 
 ## Explainability
 
-LightGBM and XGBoost use SHAP TreeExplainer. N-HiTS uses Integrated Gradients. Explanations are
-diagnostic and do not establish causal effects. Identifier importance, unstable event effects,
-and attribution drift across horizons require review.
+LightGBM and XGBoost use SHAP TreeExplainer. The champion explanation sample contains 2,000 rows,
+815 SKU-store series, and all 28 horizons. Demand history accounts for 82.17% of attribution;
+`rolling_mean_56` accounts for 36.85% and ranks first at every horizon. Identifiers account for
+3.16% and prices for 2.76%. The concentration in rolling demand level is consistent with stronger
+aggregate accuracy and weak exact timing of intermittent SKU-day spikes.
+
+Explanations are diagnostic and do not establish causal effects. The nearly one-sided positive
+`origin_day` attribution is a temporal-drift warning. Identifier importance, unstable event
+effects, missing-price behavior, and attribution drift across horizons require ongoing review.
 
 ## Inventory use
 
