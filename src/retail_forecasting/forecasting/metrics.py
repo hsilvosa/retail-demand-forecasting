@@ -57,6 +57,69 @@ def summarize_backtest_points(backtests: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).groupby("model_name", as_index=False)[metric_names].mean()
 
 
+WAPE_GRANULARITIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("sku_store_day", ()),
+    ("sku_store_28d", ("series_id",)),
+    ("store_day", ("store_id", "target_date")),
+    ("store_category_day", ("store_id", "cat_id", "target_date")),
+    ("total_day", ("target_date",)),
+    ("sku_store_week", ("series_id", "forecast_week")),
+    ("store_category_week", ("store_id", "cat_id", "forecast_week")),
+)
+
+
+def summarize_wape_by_granularity(backtests: pd.DataFrame) -> pd.DataFrame:
+    """Evaluate point forecasts at operationally meaningful aggregation levels.
+
+    WAPE is computed after aggregation within each temporal fold and then averaged
+    across folds. Bottom-level accuracy remains present as ``sku_store_day`` so a
+    coarser business KPI can never conceal weak item-day performance.
+    """
+    required = {
+        "model_name",
+        "fold_origin",
+        "series_id",
+        "store_id",
+        "cat_id",
+        "target_date",
+        "horizon",
+        "target",
+        "yhat",
+    }
+    metric_names = ["mae", "rmse", "wape", "bias"]
+    missing = required.difference(backtests.columns)
+    if missing:
+        raise ValueError(f"backtests are missing granularity columns: {sorted(missing)}")
+    if backtests.empty:
+        return pd.DataFrame(columns=["model_name", "granularity", *metric_names])
+
+    prepared = backtests.copy()
+    prepared["forecast_week"] = (prepared["horizon"].astype(int) - 1) // 7 + 1
+    rows: list[dict[str, float | str]] = []
+    for (model_name, _), fold in prepared.groupby(
+        ["model_name", "fold_origin"], sort=False
+    ):
+        for granularity, columns in WAPE_GRANULARITIES:
+            evaluated = (
+                fold.groupby(list(columns), observed=True, as_index=False)[["target", "yhat"]]
+                .sum()
+                if columns
+                else fold
+            )
+            rows.append(
+                {
+                    "model_name": str(model_name),
+                    "granularity": granularity,
+                    **point_metrics(evaluated["target"], evaluated["yhat"]),
+                }
+            )
+    return (
+        pd.DataFrame(rows)
+        .groupby(["model_name", "granularity"], as_index=False)[metric_names]
+        .mean()
+    )
+
+
 def rmsse(actual: Any, predicted: Any, history: Any) -> float:
     y = np.asarray(actual, dtype=float)
     yhat = np.asarray(predicted, dtype=float)

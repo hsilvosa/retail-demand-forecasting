@@ -13,7 +13,10 @@ import streamlit as st
 from deltalake import DeltaTable
 
 from retail_forecasting.config import load_config
-from retail_forecasting.forecasting.metrics import summarize_backtest_points
+from retail_forecasting.forecasting.metrics import (
+    summarize_backtest_points,
+    summarize_wape_by_granularity,
+)
 from retail_forecasting.inventory import InventoryPolicy, simulate_series
 
 st.set_page_config(page_title="Retail Demand Control", layout="wide")
@@ -78,6 +81,9 @@ if not metrics.empty and not backtests.empty:
     metrics = metrics.drop(columns=point_columns, errors="ignore").merge(
         point_summary, on="model_name", how="left"
     )
+    granularity_metrics = summarize_wape_by_granularity(backtests)
+else:
+    granularity_metrics = pd.DataFrame()
 
 st.title("Retail Demand Control")
 if forecasts.empty:
@@ -110,6 +116,18 @@ def champion_metric(column: str) -> float:
     return float(champion_metrics[column].iloc[0])
 
 
+def champion_granularity_metric(granularity: str, column: str) -> float:
+    if granularity_metrics.empty:
+        return 0.0
+    selected = granularity_metrics.loc[
+        (granularity_metrics["model_name"] == model_name)
+        & (granularity_metrics["granularity"] == granularity)
+    ]
+    if selected.empty:
+        return 0.0
+    return float(selected[column].iloc[0])
+
+
 recommended = recommendations.loc[recommendations["series_id"] == selected_series]
 
 overview, explorer, comparison, explanation, inventory = st.tabs(
@@ -120,17 +138,20 @@ with overview:
     columns = st.columns(4)
     columns[0].metric("Champion", model_name)
     columns[1].metric("Mean WRMSSE", f"{champion_metric('mean_wrmsse'):.4f}")
-    columns[2].metric("90% coverage", f"{champion_metric('coverage'):.1%}")
-    columns[3].metric("Forecast demand", f"{series_forecast['q50'].sum():,.1f}")
+    columns[2].metric(
+        "Store-day WAPE", f"{champion_granularity_metric('store_day', 'wape'):.1%}"
+    )
+    columns[3].metric("90% coverage", f"{champion_metric('coverage'):.1%}")
     columns = st.columns(4)
-    columns[0].metric("WAPE", f"{champion_metric('wape'):.1%}")
+    columns[0].metric("SKU-store-day WAPE", f"{champion_metric('wape'):.1%}")
     columns[1].metric("MAE", f"{champion_metric('mae'):.3f}")
     columns[2].metric("RMSE", f"{champion_metric('rmse'):.3f}")
     columns[3].metric("Bias", f"{champion_metric('bias'):.1%}")
     if champion_metric("wape") > 0.5:
         st.warning(
-            f"Bottom-level WAPE is {champion_metric('wape'):.1%}. "
-            "This development champion is a benchmark that requires further improvement."
+            f"SKU-store-day WAPE is {champion_metric('wape'):.1%}, driven by intermittent "
+            "demand. Use the granularity control in Model comparison to distinguish item-level "
+            "inventory uncertainty from aggregate planning accuracy."
         )
     st.subheader("Demand outlook")
     summary = (
@@ -190,6 +211,19 @@ with comparison:
     if metrics.empty:
         st.warning("Model metrics are not available.")
     else:
+        granularity_labels = {
+            "SKU-store by day": "sku_store_day",
+            "SKU-store over 28 days": "sku_store_28d",
+            "Store by day": "store_day",
+            "Store-category by day": "store_category_day",
+            "Total by day": "total_day",
+            "SKU-store by week": "sku_store_week",
+            "Store-category by week": "store_category_week",
+        }
+        selected_granularity_label = st.selectbox(
+            "Evaluation granularity", granularity_labels, index=2
+        )
+        selected_granularity = granularity_labels[selected_granularity_label]
         metric_options = {
             "WRMSSE": "mean_wrmsse",
             "WAPE": "wape",
@@ -203,6 +237,14 @@ with comparison:
         selected_metric = st.selectbox("Metric", metric_options)
         metric_column = metric_options[selected_metric]
         chart_data = metrics.copy()
+        if metric_column in {"wape", "mae", "rmse", "bias"}:
+            selected_point_metrics = granularity_metrics.loc[
+                granularity_metrics["granularity"] == selected_granularity,
+                ["model_name", "wape", "mae", "rmse", "bias"],
+            ]
+            chart_data = chart_data.drop(
+                columns=["wape", "mae", "rmse", "bias"], errors="ignore"
+            ).merge(selected_point_metrics, on="model_name", how="left")
         chart_data["Model"] = chart_data["model_name"].replace(
             {
                 "lightgbm": "LightGBM",
