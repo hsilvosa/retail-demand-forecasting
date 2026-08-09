@@ -24,7 +24,12 @@ def execute_notebooks(profile: str, notebook: str, notebook_dir: Path) -> list[P
         pm.execute_notebook(
             source,
             destination,
-            parameters={"profile": profile, "run_id": run_id, "force": False},
+            parameters={
+                "profile": profile,
+                "run_id": run_id,
+                "force": False,
+                "execute_stage": True,
+            },
             kernel_name="python3",
         )
         outputs.append(destination)

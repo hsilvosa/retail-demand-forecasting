@@ -120,6 +120,12 @@ The model notebooks launch real MLflow experiments. The backtesting notebook run
 selection policy and the final forecast notebook materializes the registered result. Business
 logic is not duplicated in cells.
 
+Source notebooks default to analysis-only mode through `execute_stage = False`, so opening and
+running an EDA notebook reuses existing Delta tables. The `notebooks run` CLI overrides this to
+`True` for a reproducible end-to-end notebook execution. Bronze, Silver, Gold, and backtesting
+include source audits, transformation contracts, feature definitions, normalization decisions,
+leakage checks, demand-regime analysis, and explicit limitations.
+
 ## Evaluation and promotion
 
 Backtests use origins `d_1857`, `d_1885`, and `d_1913`, each with a 28-day horizon. WRMSSE is
@@ -151,6 +157,11 @@ Moving average was therefore registered as `retail-demand-forecaster` version 3 
 the `champion` alias. LightGBM remains an accuracy candidate with global and local SHAP artifacts
 for diagnosis. The champion produced 25,200 bottom-level forecasts for `d_1942` through `d_1969`,
 representing 37,700 forecast units.
+
+The champion's 73.46% bottom-level WAPE is not production-quality. In the stored evaluation,
+57.2% of SKU-days have zero demand, but intermittency does not fully explain the weakness: WAPE
+is still 60.8% for the densest series. The current alias therefore identifies the best candidate
+under the configured promotion rules, not a model ready for operational deployment.
 
 The inventory simulation compared the champion with seasonal naive across 900 series and 28
 days. Moving average reached a 96.92% mean fill rate with 28.82 average units on hand and a total
